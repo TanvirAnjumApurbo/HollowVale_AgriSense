@@ -97,7 +97,7 @@ TOOL_SCHEMAS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "crop": {"type": "string", "description": "Crop key: rice_boro, rice_aman, wheat, maize, potato, lentil, jute, or mustard (aliases rice/boro/aman/masur also accepted)."},
+                    "crop": {"type": "string", "description": "Crop key: rice_boro, rice_aman, rice_aus, wheat, maize, potato, lentil, jute, mustard, onion, chili, tomato, or chickpea (aliases like rice/boro/aman/aus/masur/piyaj/morich/chola also accepted)."},
                     "area_acres": {"type": "number", "description": "Area in acres."},
                     "yield_adjustment_pct": {"type": "number", "description": "Optional % adjustment to expected yield, for scenario questions (e.g. -30 for a 30% rainfall/yield drop). Default 0."},
                     "price_override": {"type": "number", "description": "Optional override for the market price per unit, for scenario questions."},

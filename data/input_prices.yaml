@@ -17,3 +17,13 @@ gypsum: 15             # sulphur source (~18% S)
 zinc_sulphate: 120     # micronutrient (Zn)
 boric_acid: 250        # micronutrient (B)
 magnesium_sulphate: 35 # MgSO4 (Mg + S)
+
+# Added for broader crop coverage + organic-alternative costing. NPKS is a
+# blended compound; lime/dolomite corrects acid soils; SOP is a chloride-free
+# potash for quality-sensitive crops; cow dung is priced here so organic-vs-
+# chemical comparisons have a number (in practice it is often farmer-supplied).
+npks_16: 30            # NPKS compound blend (~16-16-16 + S)
+sop: 65                # Sulphate of Potash / K2SO4 (~50% K2O, chloride-free)
+ammonium_sulphate: 27  # AS (~21% N, 24% S) — N + sulphur source
+lime: 18               # agricultural lime / dolomite (soil acidity correction)
+cow_dung: 3            # decomposed farmyard manure / compost, per kg

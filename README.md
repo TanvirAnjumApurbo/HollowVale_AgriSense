@@ -14,7 +14,7 @@ The agent gathers a farmer's situation (location, farm size, soil type, water av
 
 1. Conversational intake with targeted follow-ups for missing fields only.
 2. Live weather grounding via a real API (Open-Meteo), used verbatim in recommendations.
-3. Crop recommendation: a deterministic multi-factor scoring engine (`tools/agronomy.py`) ranks 8 candidate crops on soil fit, season/plantability, water fit vs the live forecast, temperature, and profit/ROI -- returning per-crop component scores, a budget flag (with max affordable area), and quotable reasons that each name the exact input used. It is **date-aware**: asked on 24 July it surfaces Aman rice (whose Kharif-2 window is open now), not Boro (a November-December Rabi crop), because season logic that actually bites is more convincing than profit-sorting.
+3. Crop recommendation: a deterministic multi-factor scoring engine (`tools/agronomy.py`) ranks 13 candidate crops on soil fit, season/plantability, water fit vs the live forecast, temperature, and profit/ROI -- returning per-crop component scores, a budget flag (with max affordable area), and quotable reasons that each name the exact input used. It is **date-aware**: asked on 24 July it surfaces Aman rice (whose Kharif-2 window is open now), not Boro (a November-December Rabi crop), because season logic that actually bites is more convincing than profit-sorting.
 4. Dated season plan (land prep -> sowing -> fertilizer timing -> irrigation -> pest/weed checkpoints -> harvest).
 5. Financial projection: itemized costs, yield, revenue, net profit, ROI, break-even -- computed deterministically, not by the LLM.
 6. Explained reasoning: every recommendation cites the specific farm inputs and retrieved data behind it.

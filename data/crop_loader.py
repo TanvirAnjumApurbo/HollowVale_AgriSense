@@ -40,6 +40,21 @@ ALIASES = {
     "sarisha": "mustard",
     "rai": "mustard",
     "mustard_sarisha": "mustard",
+    "aus": "rice_aus",
+    "aus_rice": "rice_aus",
+    "piyaj": "onion",
+    "peyaj": "onion",
+    "pyaj": "onion",
+    "morich": "chili",
+    "chilli": "chili",
+    "green_chili": "chili",
+    "tomatoes": "tomato",
+    "chola": "chickpea",
+    "chhola": "chickpea",
+    "chana": "chickpea",
+    "chick_pea": "chickpea",
+    "gram": "chickpea",
+    "bengal_gram": "chickpea",
 }
 
 

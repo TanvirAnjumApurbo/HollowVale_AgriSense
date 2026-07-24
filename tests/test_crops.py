@@ -26,13 +26,16 @@ REQUIRED_KEYS = [
 ]
 SOIL_CLASSES = ["clay", "clay_loam", "loam", "sandy_loam", "sandy"]
 VALID_SEASONS = {"rabi", "kharif_1", "kharif_2"}
-EXPECTED_CROPS = {"rice_boro", "rice_aman", "wheat", "maize", "potato", "lentil", "jute", "mustard"}
+EXPECTED_CROPS = {
+    "rice_boro", "rice_aman", "rice_aus", "wheat", "maize", "potato", "lentil",
+    "jute", "mustard", "onion", "chili", "tomato", "chickpea",
+}
 
 CROPS = load_crops()
 PRICES = load_input_prices()
 
 
-def test_yaml_parses_and_has_eight_crops():
+def test_yaml_parses_and_has_expected_crops():
     assert isinstance(CROPS, dict)
     assert set(CROPS) == EXPECTED_CROPS, f"crop set drifted: {set(CROPS) ^ EXPECTED_CROPS}"
 

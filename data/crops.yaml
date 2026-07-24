@@ -350,3 +350,215 @@ mustard:
   sources:
     - "https://www.bamis.gov.bd/en/croppnp/1/all/all/"
     - "http://www.bari.gov.bd/"
+
+rice_aus:
+  label: "Aus Rice (pre-monsoon, direct-seeded / transplanted)"
+  seasons: [kharif_1]
+  sowing_window: {start: "03-20", end: "04-30"}
+  duration_days: 105
+  soil_suitability: {clay: 0.9, clay_loam: 1.0, loam: 0.8, sandy_loam: 0.6, sandy: 0.4}
+  water_requirement_mm: 600             # pre-monsoon start needs irrigation before rains set in
+  temp_range_c: {min: 21, max: 37}      # hot-season rice
+  yield_per_acre_kg: 1500
+  price_per_kg_bdt: 29
+  seed_kg_per_acre: 20
+  seed_price_per_kg_bdt: 52
+  labour_bdt_per_acre: 8000
+  irrigation_bdt_per_acre: 2500
+  fertilizer_schedule:      # BAMIS Aus kg/bigha x3 -> kg/acre (lower N than Boro, shorter crop)
+    - {day: 0,  input: tsp,    kg_per_acre: 30, note: "basal at land prep"}
+    - {day: 0,  input: mp,     kg_per_acre: 27, note: "basal at land prep"}
+    - {day: 0,  input: gypsum, kg_per_acre: 21, note: "basal at land prep"}
+    - {day: 15, input: urea,   kg_per_acre: 33, note: "1st top dressing"}
+    - {day: 35, input: urea,   kg_per_acre: 33, note: "2nd top dressing, max tillering"}
+  irrigation:
+    - {stage: "establishment", day_from: 0,  day_to: 25, depth_cm: 3, note: "pre-monsoon; irrigate until the rains set in"}
+    - {stage: "reproductive",  day_from: 55, day_to: 80, depth_cm: 4, note: "keep saturated at flowering"}
+  pest_windows:
+    - {pest: "Yellow stem borer", day_from: 25, day_to: 55,
+       sign: "dead hearts in the vegetative stage",
+       control: "Cartap or Fipronil at first dead-hearts", cost_bdt_per_acre: 800}
+    - {pest: "Rice hispa", day_from: 20, day_to: 50,
+       sign: "parallel white scrape-marks along the leaf blade",
+       control: "hand-net the beetles; Chlorpyrifos if severe", cost_bdt_per_acre: 500}
+  stages:
+    - {name: "Land preparation / seedbed", day_from: -20, day_to: 0}
+    - {name: "Establishment",      day_from: 0,  day_to: 25}
+    - {name: "Tillering",          day_from: 25, day_to: 55}
+    - {name: "Panicle initiation", day_from: 55, day_to: 70}
+    - {name: "Flowering",          day_from: 70, day_to: 90}
+    - {name: "Grain-fill & maturity", day_from: 90, day_to: 105}
+  sources:
+    - "http://www.brri.gov.bd/"
+    - "https://www.bamis.gov.bd/en/croppnp/1/all/all/"
+
+onion:
+  label: "Onion / Piyaj (Rabi bulb crop)"
+  seasons: [rabi]
+  sowing_window: {start: "11-01", end: "12-15"}   # seedling transplanting
+  duration_days: 120
+  soil_suitability: {clay: 0.3, clay_loam: 0.7, loam: 1.0, sandy_loam: 1.0, sandy: 0.6}  # needs well-drained soil, hates waterlogging
+  water_requirement_mm: 450
+  temp_range_c: {min: 13, max: 30}
+  yield_per_acre_kg: 4500
+  price_per_kg_bdt: 45                  # volatile; harvest-season farm-gate estimate
+  seed_kg_per_acre: 4
+  seed_price_per_kg_bdt: 1800           # true onion seed is expensive
+  labour_bdt_per_acre: 15000            # transplanting + repeated weeding
+  irrigation_bdt_per_acre: 3500
+  fertilizer_schedule:      # BARI onion kg/ha / 2.471 -> kg/acre (heavy N & S feeder)
+    - {day: 0,  input: tsp,           kg_per_acre: 61, note: "basal at final land prep"}
+    - {day: 0,  input: gypsum,        kg_per_acre: 45, note: "basal — onion is responsive to sulphur"}
+    - {day: 0,  input: zinc_sulphate, kg_per_acre: 4,  note: "basal at final land prep"}
+    - {day: 0,  input: boric_acid,    kg_per_acre: 3,  note: "basal at final land prep"}
+    - {day: 0,  input: urea,          kg_per_acre: 34, note: "1/3 urea basal"}
+    - {day: 0,  input: mp,            kg_per_acre: 30, note: "half MoP basal"}
+    - {day: 25, input: urea,          kg_per_acre: 34, note: "1st top dressing, 25-30 DAT"}
+    - {day: 45, input: urea,          kg_per_acre: 33, note: "2nd top dressing before bulbing"}
+    - {day: 45, input: mp,            kg_per_acre: 31, note: "remaining MoP at bulbing"}
+  irrigation:
+    - {stage: "establishment", day_from: 5,  day_to: 20, depth_cm: 3}
+    - {stage: "bulbing",       day_from: 45, day_to: 85, depth_cm: 4, note: "critical — steady moisture; stop ~10 days before harvest"}
+  pest_windows:
+    - {pest: "Onion thrips", day_from: 30, day_to: 80,
+       sign: "silvery streaks and curling on leaves in dry spells",
+       control: "Spinosad / Imidacloprid at threshold", cost_bdt_per_acre: 900}
+    - {pest: "Purple blotch (Alternaria)", day_from: 40, day_to: 90,
+       sign: "purple-centred lesions on leaves in dewy weather",
+       control: "Mancozeb or Iprodione spray", cost_bdt_per_acre: 800}
+  stages:
+    - {name: "Transplanting",     day_from: 0,   day_to: 5}
+    - {name: "Establishment",     day_from: 5,   day_to: 30}
+    - {name: "Vegetative",        day_from: 30,  day_to: 55}
+    - {name: "Bulbing",           day_from: 55,  day_to: 100}
+    - {name: "Maturity & curing", day_from: 100, day_to: 120}
+  sources:
+    - "http://www.bari.gov.bd/"
+    - "https://www.bamis.gov.bd/en/croppnp/1/all/all/"
+
+chili:
+  label: "Chili / Morich (winter transplanted)"
+  seasons: [rabi]
+  sowing_window: {start: "09-15", end: "11-15"}   # seedling transplanting
+  duration_days: 150
+  soil_suitability: {clay: 0.4, clay_loam: 0.8, loam: 1.0, sandy_loam: 0.9, sandy: 0.6}
+  water_requirement_mm: 500
+  temp_range_c: {min: 15, max: 32}
+  yield_per_acre_kg: 3000               # green chili
+  price_per_kg_bdt: 60                  # green chili farm-gate, volatile
+  seed_kg_per_acre: 0.4
+  seed_price_per_kg_bdt: 4000           # hybrid chili seed
+  labour_bdt_per_acre: 16000            # repeated hand-picking
+  irrigation_bdt_per_acre: 3000
+  fertilizer_schedule:      # BARI chili kg/ha / 2.471 -> kg/acre
+    - {day: 0,  input: tsp,           kg_per_acre: 61, note: "basal at final land prep"}
+    - {day: 0,  input: gypsum,        kg_per_acre: 40, note: "basal at final land prep"}
+    - {day: 0,  input: zinc_sulphate, kg_per_acre: 4,  note: "basal at final land prep"}
+    - {day: 0,  input: boric_acid,    kg_per_acre: 3,  note: "basal at final land prep"}
+    - {day: 0,  input: urea,          kg_per_acre: 27, note: "1/3 urea basal"}
+    - {day: 0,  input: mp,            kg_per_acre: 25, note: "half MoP basal"}
+    - {day: 25, input: urea,          kg_per_acre: 27, note: "1st top dressing"}
+    - {day: 50, input: urea,          kg_per_acre: 27, note: "2nd top dressing at flowering"}
+    - {day: 50, input: mp,            kg_per_acre: 24, note: "remaining MoP at flowering"}
+  irrigation:
+    - {stage: "establishment",   day_from: 5,  day_to: 25,  depth_cm: 3}
+    - {stage: "flowering-fruit", day_from: 50, day_to: 120, depth_cm: 4, note: "avoid both water stress and waterlogging during fruiting"}
+  pest_windows:
+    - {pest: "Thrips & mites", day_from: 30, day_to: 90,
+       sign: "upward leaf curl (thrips) / downward cupping and bronzing (mite)",
+       control: "Abamectin / Spiromesifen at threshold", cost_bdt_per_acre: 1000}
+    - {pest: "Anthracnose (fruit rot)", day_from: 80, day_to: 140,
+       sign: "sunken dark spots with concentric rings on ripening fruit",
+       control: "Azoxystrobin or Mancozeb spray", cost_bdt_per_acre: 900}
+  stages:
+    - {name: "Transplanting",       day_from: 0,  day_to: 5}
+    - {name: "Establishment",       day_from: 5,  day_to: 30}
+    - {name: "Vegetative",          day_from: 30, day_to: 55}
+    - {name: "Flowering",           day_from: 55, day_to: 80}
+    - {name: "Fruiting & picking",  day_from: 80, day_to: 150}
+  sources:
+    - "http://www.bari.gov.bd/"
+    - "https://www.bamis.gov.bd/en/croppnp/1/all/all/"
+
+tomato:
+  label: "Tomato (Rabi winter vegetable)"
+  seasons: [rabi]
+  sowing_window: {start: "10-15", end: "11-30"}   # seedling transplanting
+  duration_days: 110
+  soil_suitability: {clay: 0.4, clay_loam: 0.8, loam: 1.0, sandy_loam: 0.9, sandy: 0.6}
+  water_requirement_mm: 450
+  temp_range_c: {min: 15, max: 30}
+  yield_per_acre_kg: 9000
+  price_per_kg_bdt: 30
+  seed_kg_per_acre: 0.15
+  seed_price_per_kg_bdt: 18000          # hybrid tomato seed
+  labour_bdt_per_acre: 15000            # staking, pruning, harvesting
+  irrigation_bdt_per_acre: 3000
+  fertilizer_schedule:      # BARI tomato kg/ha / 2.471 -> kg/acre (heavy feeder)
+    - {day: 0,  input: tsp,                kg_per_acre: 73, note: "basal at final land prep"}
+    - {day: 0,  input: gypsum,             kg_per_acre: 40, note: "basal at final land prep"}
+    - {day: 0,  input: zinc_sulphate,      kg_per_acre: 4,  note: "basal at final land prep"}
+    - {day: 0,  input: boric_acid,         kg_per_acre: 4,  note: "basal — boron guards against fruit cracking"}
+    - {day: 0,  input: magnesium_sulphate, kg_per_acre: 30, note: "basal at final land prep"}
+    - {day: 0,  input: urea,               kg_per_acre: 30, note: "1/3 urea basal"}
+    - {day: 0,  input: mp,                 kg_per_acre: 30, note: "half MoP basal"}
+    - {day: 25, input: urea,               kg_per_acre: 30, note: "1st top dressing"}
+    - {day: 45, input: urea,               kg_per_acre: 29, note: "2nd top dressing at fruit set"}
+    - {day: 45, input: mp,                 kg_per_acre: 31, note: "remaining MoP at fruit set"}
+  irrigation:
+    - {stage: "establishment",   day_from: 5,  day_to: 20, depth_cm: 3}
+    - {stage: "flowering-fruit", day_from: 40, day_to: 90, depth_cm: 4, note: "even moisture prevents blossom-end rot and cracking"}
+  pest_windows:
+    - {pest: "Tomato fruit borer", day_from: 45, day_to: 95,
+       sign: "bore holes at the calyx end of the fruit",
+       control: "Pheromone traps + Emamectin benzoate", cost_bdt_per_acre: 1100}
+    - {pest: "Late blight", day_from: 30, day_to: 75,
+       sign: "water-soaked leaf/stem lesions spreading fast in cool foggy weather",
+       control: "Preventive Mancozeb; Cymoxanil+Mancozeb once seen", cost_bdt_per_acre: 1500}
+  stages:
+    - {name: "Transplanting",           day_from: 0,  day_to: 5}
+    - {name: "Establishment",           day_from: 5,  day_to: 25}
+    - {name: "Vegetative",              day_from: 25, day_to: 45}
+    - {name: "Flowering & fruit set",   day_from: 45, day_to: 70}
+    - {name: "Fruiting & harvest",      day_from: 70, day_to: 110}
+  sources:
+    - "http://www.bari.gov.bd/"
+    - "https://www.bamis.gov.bd/en/croppnp/1/all/all/"
+
+chickpea:
+  label: "Chickpea / Chola (Rabi pulse)"
+  seasons: [rabi]
+  sowing_window: {start: "10-25", end: "11-30"}
+  duration_days: 120
+  soil_suitability: {clay: 0.4, clay_loam: 0.9, loam: 1.0, sandy_loam: 0.9, sandy: 0.6}  # dislikes waterlogging
+  water_requirement_mm: 180             # residual-moisture crop, minimal irrigation
+  temp_range_c: {min: 12, max: 30}
+  yield_per_acre_kg: 520
+  price_per_kg_bdt: 85
+  seed_kg_per_acre: 16
+  seed_price_per_kg_bdt: 100
+  labour_bdt_per_acre: 4000
+  irrigation_bdt_per_acre: 800
+  fertilizer_schedule:      # BARI chickpea, single basal (legume fixes most of its N) kg/ha / 2.471 -> kg/acre
+    - {day: 0, input: urea,   kg_per_acre: 16, note: "starter N basal — legume fixes the rest"}
+    - {day: 0, input: tsp,    kg_per_acre: 32, note: "basal at sowing"}
+    - {day: 0, input: mp,     kg_per_acre: 16, note: "basal at sowing"}
+    - {day: 0, input: gypsum, kg_per_acre: 20, note: "basal — sulphur for the pulse"}
+  irrigation:
+    - {stage: "pre-flower", day_from: 30, day_to: 45, depth_cm: 3, note: "one light irrigation only if the soil dries out"}
+  pest_windows:
+    - {pest: "Pod borer (Helicoverpa)", day_from: 55, day_to: 95,
+       sign: "larvae boring into developing pods — the major chickpea pest",
+       control: "Pheromone traps + Emamectin benzoate at flowering", cost_bdt_per_acre: 700}
+    - {pest: "Botrytis grey mould", day_from: 50, day_to: 80,
+       sign: "grey fungal growth on shoots/pods in a humid, dense canopy",
+       control: "Carbendazim spray; wider spacing", cost_bdt_per_acre: 500}
+  stages:
+    - {name: "Sowing",     day_from: 0,   day_to: 3}
+    - {name: "Vegetative", day_from: 3,   day_to: 45}
+    - {name: "Flowering",  day_from: 45,  day_to: 70}
+    - {name: "Podding",    day_from: 70,  day_to: 100}
+    - {name: "Maturity",   day_from: 100, day_to: 120}
+  sources:
+    - "http://www.bari.gov.bd/"
+    - "https://www.bamis.gov.bd/en/croppnp/1/all/all/"

@@ -32,8 +32,18 @@ CASES = [
     ("jute fibre retting and harvest", "jute_cultivation.md"),
     ("mustard sarisha aphid pest control", "mustard.md"),
     ("mustard sowing window and sulphur requirement", "mustard.md"),
-    ("brown plant hopper favorable conditions in rice", "rice_pests_bamis.md"),
+    ("brown plant hopper hopperburn in rice", "rice_pests_bamis.md"),
     ("cropping seasons kharif and rabi in bangladesh", "soil_and_seasons_bangladesh.md"),
+    ("pre-monsoon aus rice sowing window and seed rate", "rice_aus.md"),
+    ("aus rice needs less nitrogen than boro fertilizer", "rice_aus.md"),
+    ("onion bulb transplanting time and spacing", "onion.md"),
+    ("onion thrips and purple blotch disease control", "onion.md"),
+    ("chili morich leaf curl from thrips and mites", "chili.md"),
+    ("chili fertilizer dose and flowering", "chili.md"),
+    ("tomato late blight and fruit borer control", "tomato.md"),
+    ("tomato boron to prevent fruit cracking", "tomato.md"),
+    ("chickpea chola sowing on residual moisture", "chickpea.md"),
+    ("chickpea pod borer helicoverpa control", "chickpea.md"),
 ]
 
 

@@ -25,6 +25,10 @@ CROP_ALIASES = {
     "lentil": ["lentil", "masur"],
     "jute": ["jute"],
     "mustard": ["mustard", "sarisha", "rapeseed", "canola"],
+    "onion": ["onion", "piyaj", "peyaj"],
+    "chili": ["chili", "morich"],
+    "tomato": ["tomato"],
+    "chickpea": ["chickpea", "chick pea", "chola", "chhola", "chana"],
 }
 
 
