@@ -15,13 +15,13 @@ The agent gathers a farmer's situation (location, farm size, soil type, water av
 1. Conversational intake with targeted follow-ups for missing fields only.
 2. Live weather grounding via a real API (Open-Meteo), used verbatim in recommendations.
 3. Crop recommendation: a deterministic multi-factor scoring engine (`tools/agronomy.py`) ranks 13 candidate crops on soil fit, season/plantability, water fit vs the live forecast, temperature, and profit/ROI -- returning per-crop component scores, a budget flag (with max affordable area), and quotable reasons that each name the exact input used. It is **date-aware**: asked on 24 July it surfaces Aman rice (whose Kharif-2 window is open now), not Boro (a November-December Rabi crop), because season logic that actually bites is more convincing than profit-sorting.
-4. Dated season plan (land prep -> sowing -> fertilizer timing -> irrigation -> pest/weed checkpoints -> harvest).
+4. Deterministic dated season plan (`tools/season_plan.py`): an explicit sowing date plus stored day offsets produces one sourced chronological calendar from land preparation through harvest, with event costs reconciled to the financial projection.
 5. Financial projection: itemized costs, yield, revenue, net profit, ROI, break-even -- computed deterministically, not by the LLM.
 6. Explained reasoning: every recommendation cites the specific farm inputs and retrieved data behind it.
 7. Knowledge base with RAG: real public agronomic sources, chunked and embedded locally, retrieved and grounding every crop/fertilizer/season-plan answer.
 8. Visible agent trace: a sidebar panel logs every tool call, its arguments, and its raw returned value.
 
-Tier 1/2 features (persistent memory, proactive weather-triggered advice, scenario simulation, bdapps CaaS checkout, etc.) are scoped and architected for but not yet built -- see the closing section.
+**Tier 1 now implemented:** proactive weather-triggered nitrogen scheduling. If Open-Meteo shows more than 10 mm total rain within 48 hours of a rain-sensitive, non-basal application, the calendar moves it to the first supplied safe forecast day under 5 mm and records the original date, forecast amount, and reason. Other Tier 1/2 features (persistent memory, broader scenario simulation, bdapps CaaS checkout, etc.) remain scoped -- see the closing section.
 
 ## What's real vs mock
 
@@ -45,6 +45,7 @@ Tier 1/2 features (persistent memory, proactive weather-triggered advice, scenar
   - `knowledge_base.py` -- RAG retrieval over a local Chroma vector store.
   - `agronomy.py` -- deterministic multi-factor crop scoring (`score_crop` / `rank_crops`): soil / season / water / temp / profit components, an overall weighted score, a budget flag, and a `reasons` list emitted **as data** so the LLM narrates the reasoning rather than inventing it.
   - `financials.py` -- deterministic cost/yield/ROI/break-even calculator (plain Python, not LLM arithmetic).
+  - `season_plan.py` -- merges crop stages, fertilizer applications, irrigation checkpoints and pest windows into real ISO dates, adds seed/labour/harvest events, allocates every cost category without cent drift, and applies forecast-backed nitrogen shifts without inventing replacement dates.
 - **`data/`** -- a deliberately **two-layer** knowledge design:
   - `crops.yaml` + `input_prices.yaml` -- the machine-readable layer (Layer A) that drives the deterministic tools: per-crop seasons, sowing windows, soil suitability, water/temperature needs, dose schedules, pest windows and economics. `crop_loader.py` loads it and derives per-acre costs. This is the single source of truth for both `agronomy.py` and `financials.py`.
   - `raw/*.md` -- the prose corpus (Layer B) that drives RAG + citations, one sourced document per crop/topic with a `Source:` line.
@@ -79,6 +80,7 @@ For Streamlit Community Cloud deployment, set `OPENAI_API_KEY` (and optionally `
 - `pip install -r requirements-dev.txt` then `pytest tests/ -q` -- the dataset + retrieval gate (crop schema, schedule-derived cost consistency, and ~17 RAG queries each landing the right source doc in the top-3).
 - `python -m tools.agronomy` -- self-checks the scoring engine: flipping soil (clay vs sandy) changes the top crop, flipping season (Kharif-2 vs Rabi) changes the top crop, halving the budget flips the affordability flag and the max affordable area, and every ranked crop carries >=4 reasons.
 - `python -m tools.financials` -- confirms costs scale linearly with area, yield adjustments move profit correctly, aliases resolve (`rice`->`rice_boro`), and fertilizer cost is the schedule-derived figure.
+- `pytest tests/test_season_plan.py -q` -- confirms exact harvest offsets, chronological/source-complete events, synthetic 40 mm rain rescheduling, strict wet/dry thresholds, no fabricated dry date, and event-to-projection cost reconciliation.
 - `python tools/weather.py` -- confirms real geocoding + forecast values return for sample Bangladesh locations.
 - `python data/ingest.py` then `python tools/knowledge_base.py` -- confirms retrieval returns topically relevant, correctly-sourced chunks.
 - `streamlit run app.py` -- full conversational walkthrough from a vague opener to a costed season plan, with every tool call visible in the sidebar trace.
@@ -86,5 +88,5 @@ For Streamlit Community Cloud deployment, set `OPENAI_API_KEY` (and optionally `
 ## Where Tier 1 / Tier 2 hook in next
 
 - **Persistent memory** -- swap `memory/session_store.py` to SQLite (or Supabase Postgres), same interface.
-- **Weather-triggered proactive advice / fertilizer & irrigation scheduler / pest & disease risk / scenario simulation** -- additional KB-grounded tools alongside `tools/financials.py`, following the same pattern.
+- **Next agronomy upgrades** -- irrigation rescheduling, pest/disease risk triggers, and broader scenario simulation can extend the same deterministic calendar/tool pattern.
 - **bdapps CaaS payment integration** -- per the official `bdapps-API-DGD` guide, the Direct Debit charge call is a synchronous, merchant-initiated REST call (`POST https://developer.bdapps.com/caas/direct/debit`) with the transaction result returned in the same HTTP response -- no inbound webhook needed, so it drops straight into this same Streamlit app as another outbound tool call once `applicationId`/`password` are provisioned via the bdapps developer portal.

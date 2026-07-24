@@ -25,11 +25,13 @@ python data/ingest.py                   # re-run after editing any data/raw/*.md
 pip install -r requirements-dev.txt
 pytest tests/ -q                                                   # full suite
 pytest tests/test_crops.py -q                                      # crop schema + cost-consistency only
+pytest tests/test_season_plan.py -q                                # dated calendar + weather shift + cost reconciliation
 pytest "tests/test_crops.py::test_projection_cost_is_schedule_derived[potato]" -q   # a single test/param
 
 # Deterministic self-checks — runnable modules, no pytest needed
 python -m tools.agronomy                # scoring engine: soil/season flip the ranking, budget flag flips, reasons present
 python -m tools.financials              # cost scales with area, aliases resolve, fertilizer cost is schedule-derived
+python -m tools.season_plan              # dated Boro demo with a synthetic rain-driven urea shift
 python -m data.crop_loader              # dump all crops + derived per-acre cost breakdowns
 python tools/weather.py                 # live Open-Meteo geocode+forecast (hits network)
 ```
@@ -44,7 +46,7 @@ The single most important constraint: **the model never does arithmetic or suita
 
 - State is passed **by reference** from `st.session_state`: `conversation_history`, `farmer_profile`, and `trace_log` are mutated in place, which is how the UI reflects updates. `run_turn(conversation_history, user_message, farmer_profile, trace_log)`.
 - Each iteration: `messages = [system(farmer_profile)] + history + [user]`, call `chat()`, execute any tool calls, append results, then **rebuild the system prompt** from the (possibly updated) profile so intake tracking stays current mid-turn.
-- A per-turn `context = {farmer_profile, last_weather}` is threaded into `_execute_tool`. `get_weather` caches its real result into `context`; `rank_crops` reads the live profile + cached forecast from `context` — **not** from LLM-supplied args — so scoring uses injected real data, not numbers the model might fudge.
+- A per-turn `context = {farmer_profile, last_weather}` is threaded into `_execute_tool`. `get_weather` caches its real result into `context`; `rank_crops` and `build_season_calendar` read the cached forecast from `context` — **not** from LLM-supplied args — so scoring and weather adjustments use injected real data, not numbers the model might fudge.
 - On the final iteration (`MAX_TOOL_ITERATIONS`) tools are withheld (`tools=None`) to force a text answer instead of dead-ending on the cap.
 - On success it appends user+assistant to `conversation_history`. On exception it raises *before* appending; `app.py` catches that and records the failed turn (message + error) into history and trace, so failures are visible rather than silently lost on `st.rerun()`.
 

@@ -15,6 +15,7 @@ from tools.weather import get_weather_for_location
 from tools.knowledge_base import search_knowledge_base
 from tools.financials import compute_financial_projection
 from tools.agronomy import rank_crops
+from tools.season_plan import build_season_calendar
 
 MAX_TOOL_ITERATIONS = 12
 
@@ -106,6 +107,40 @@ TOOL_SCHEMAS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "build_season_calendar",
+            "description": (
+                "Build one chronological, dated and fully costed crop calendar from the exact "
+                "sowing/transplanting date plus day offsets in crops.yaml. Returns stage, seed, "
+                "labour, fertilizer, irrigation, pest and harvest events with sources; its event "
+                "costs exactly reconcile with the financial projection. The latest Open-Meteo "
+                "forecast fetched in this same turn is injected automatically so rain-sensitive "
+                "non-basal nitrogen applications exposed to >10 mm total rain within 48 hours "
+                "can move to the first safe forecast day under 5 mm. Never invent or estimate "
+                "sowing_date: get an explicit YYYY-MM-DD date from the farmer first."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "crop_key": {
+                        "type": "string",
+                        "description": "Crop key or accepted alias, e.g. rice_boro, boro, wheat, or potato.",
+                    },
+                    "sowing_date": {
+                        "type": "string",
+                        "description": "Farmer-confirmed sowing/transplanting date in YYYY-MM-DD format.",
+                    },
+                    "area_acres": {
+                        "type": "number",
+                        "description": "Area planted to this crop in acres.",
+                    },
+                },
+                "required": ["crop_key", "sowing_date", "area_acres"],
+            },
+        },
+    },
 ]
 
 
@@ -134,6 +169,13 @@ def _execute_tool(name, args, context):
             args["area_acres"],
             yield_adjustment_pct=args.get("yield_adjustment_pct", 0.0),
             price_override=args.get("price_override"),
+        )
+    if name == "build_season_calendar":
+        return build_season_calendar(
+            args["crop_key"],
+            args["sowing_date"],
+            args["area_acres"],
+            weather=context.get("last_weather"),
         )
     return {"error": f"Unknown tool '{name}'"}
 
