@@ -22,7 +22,7 @@ BDAPPS_SIDECAR_URL = os.environ.get("BDAPPS_SIDECAR_URL", "http://localhost:8000
 
 from agent.orchestrator import run_turn
 from agent.prompts import missing_fields
-from memory import auth, conversations as convs, db
+from memory import auth, conversations as convs, db, rate_limit
 from memory.session_store import (
     init_session,
     get_conversation_history,
@@ -369,6 +369,12 @@ with st.sidebar:
         account_col.markdown(f"👤 **{current_user['username']}**")
         if logout_col.button("Log out", key="logout_btn", use_container_width=True):
             _logout()
+        sidebar_quota = rate_limit.check(current_user["id"])
+        if sidebar_quota["tracked"] and sidebar_quota["remaining"] is not None:
+            st.caption(
+                f"⚡ {sidebar_quota['remaining']} of {sidebar_quota['limit']} "
+                "agent requests left (rolling 24 h)"
+            )
 
 st.title("🌾 AgriSense AI")
 st.caption("From a vague opening message to a grounded, explained, costed season plan.")
@@ -465,6 +471,39 @@ if user_input:
     # user's message AND the error here -- otherwise the rerun below redraws
     # history from scratch and the failed turn (message + error) silently
     # disappears, making the app look like it ignored the user.
+    # Enforce the usage limit BEFORE any expensive agent work. A blocked
+    # attempt is not persisted, not counted, and blocks nothing else --
+    # login, history, old chats, and saved plans all stay accessible.
+    quota = rate_limit.check(current_user["id"])
+    if not quota["allowed"]:
+        with st.chat_message("user", avatar=AVATARS["user"]):
+            st.markdown(user_input)
+        with st.chat_message("assistant", avatar=AVATARS["assistant"]):
+            if quota["blocked_by"] == "global":
+                headline = (
+                    "The app-wide usage limit "
+                    f"({quota['global_used']}/{quota['global_limit']} requests "
+                    "in 24 h) has been reached."
+                )
+            else:
+                headline = (
+                    "You've used all "
+                    f"{quota['used']}/{quota['limit']} of your agent requests "
+                    "for the last 24 hours."
+                )
+            retry_at = quota.get("retry_at")
+            when = (
+                retry_at.astimezone().strftime("%b %d, %H:%M")
+                if retry_at
+                else "within 24 hours"
+            )
+            st.warning(
+                f"{headline}\n\n"
+                f"New agent requests become available around **{when}**. "
+                "Your saved conversations and plans remain fully accessible."
+            )
+        st.stop()
+
     # Echo the user's message immediately, then run the agent inside a live
     # status block in the assistant's message: tool calls appear as they
     # execute (see _LiveTrace), and the block collapses when the turn ends.
@@ -510,6 +549,17 @@ if user_input:
     # per-turn slice aligned with the assistant message just appended.
     get_trace_log().extend(turn_trace)
     get_turn_traces().append(list(turn_trace))
+
+    # Count usage only when an expensive LLM round-trip demonstrably
+    # happened: every success, or a failure whose trace contains at least
+    # one real tool call (the model answered and requested tools). A turn
+    # that died before reaching the LLM leaves only the ERROR entry and is
+    # not charged against the quota.
+    consumed_api = (not turn_failed) or any(
+        entry.get("tool") != "ERROR" for entry in turn_trace
+    )
+    if consumed_api:
+        rate_limit.record(current_user["id"])
 
     # Persist the completed turn. This branch runs exactly once per
     # submission (chat_input only returns a value on the submitting rerun,
