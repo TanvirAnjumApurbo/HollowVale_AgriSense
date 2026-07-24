@@ -13,7 +13,7 @@ that ingest still runs.
 
 import pytest
 
-from tools.knowledge_base import search_knowledge_base
+from tools.knowledge_base import search_knowledge_base, _detect_crop
 
 # (query, expected source file that should appear in the top-3 results)
 CASES = [
@@ -44,6 +44,18 @@ CASES = [
     ("tomato boron to prevent fruit cracking", "tomato.md"),
     ("chickpea chola sowing on residual moisture", "chickpea.md"),
     ("chickpea pod borer helicoverpa control", "chickpea.md"),
+    # Curated docs distilled from the BARC FRG-2024 source PDFs (topic docs,
+    # not crop-specific). Anchored on phrasing unique to each doc.
+    ("how to identify adulterated organic fertilizer", "frg_climate_smart_soil_management.md"),
+    ("liming to correct acidic soil with dolomite", "frg_climate_smart_soil_management.md"),
+    ("which nutrients are deficient in bangladesh soils", "frg_soil_fertility_aez.md"),
+    ("fragile ecosystems barind haor char coastal", "frg_soil_fertility_aez.md"),
+    ("urea super granule deep placement nitrogen use efficiency", "frg_fertilizers_and_their_use.md"),
+    ("4R nutrient stewardship right source rate time place", "frg_fertilizers_and_their_use.md"),
+    ("per acre seed requirement and time of sowing for crops", "bangladesh_crop_calendar.md"),
+    ("quintals of seed tuber and kilograms of seed per acre", "bangladesh_crop_calendar.md"),
+    ("recommended nutrient dose by soil test fertility class", "frg_fertilizer_recommendation_crops.md"),
+    ("yield goal and fertilizer recommendation by fertility class", "frg_fertilizer_recommendation_crops.md"),
 ]
 
 
@@ -56,6 +68,19 @@ def _top_files(query, k=3):
 def test_expected_doc_in_top3(query, expected):
     files = _top_files(query, k=3)
     assert expected in files, f"{expected!r} not in top-3 for {query!r}; got {files}"
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("tomato boron to prevent fruit cracking", "tomato"),   # 'boron' must not read as 'boro'
+    ("boron deficiency in mustard", "mustard"),
+    ("urea top dressing timing for boro rice", "rice"),      # genuine 'boro' still detected
+    ("aus rice sowing window", "rice"),
+    ("potato late blight control", "potato"),
+])
+def test_detect_crop_is_whole_word(text, expected):
+    """Whole-word alias matching: short rice aliases ('boro', 'aus') must not
+    fire inside longer words like 'boron'."""
+    assert _detect_crop(text) == expected
 
 
 def test_crop_filter_promotes_matching_crop():

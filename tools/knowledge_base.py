@@ -7,6 +7,7 @@ is missing (e.g. on a fresh clone), it is rebuilt from data/raw on first use.
 """
 
 import os
+import re
 
 import chromadb
 from chromadb.utils import embedding_functions
@@ -33,12 +34,17 @@ CROP_ALIASES = {
 
 
 def _detect_crop(text):
-    """Return the canonical crop key referenced in text, or None."""
+    """Return the canonical crop key referenced in text, or None.
+
+    Whole-word matching (mirrors data/ingest.py::_alias_present) so a query
+    like "tomato boron to prevent fruit cracking" is not misread as `boro`
+    (rice) -- the short rice aliases collide badly under substring matching.
+    """
     if not text:
         return None
     lower = text.lower()
     for canonical, aliases in CROP_ALIASES.items():
-        if any(a in lower for a in aliases):
+        if any(re.search(rf"\b{re.escape(a)}\b", lower) for a in aliases):
             return canonical
     return None
 
@@ -88,9 +94,12 @@ def search_knowledge_base(query, n_results=4, crop_filter=None):
         collection = _get_collection()
 
         # Pull a wide pool so crop-matching chunks are available to promote.
+        # Crop promotion can only reorder chunks that are IN this pool, so the
+        # floor has to stay a healthy fraction of the corpus, which grew when
+        # the multi-crop topic docs (FRG guide, crop calendar) were added.
         # Chroma embeds `query` with the collection's own embedding function,
         # so it must be the same one used at ingest time (ONNX MiniLM).
-        pool_size = max(n_results * 4, 12)
+        pool_size = max(n_results * 8, 24)
         results = collection.query(query_texts=[query], n_results=pool_size)
     except Exception as exc:
         message = f"Knowledge-base retrieval failed for query {query!r}: {exc}"

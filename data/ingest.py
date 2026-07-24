@@ -76,6 +76,15 @@ CROP_ALIASES = {
 }
 
 
+def _alias_present(alias, lower_text):
+    """Whole-word alias match. Substring matching would tag 'boron' as `boro`
+    (rice), 'aus' inside longer words, etc. -- and the short rice aliases in
+    particular are the ones that collide. The query-side `_detect_crop` in
+    tools/knowledge_base.py must use the same rule so tags and detection agree.
+    """
+    return re.search(rf"\b{re.escape(alias)}\b", lower_text) is not None
+
+
 def guess_crop_tags(text):
     """Return canonical crop keys mentioned in the text.
 
@@ -86,7 +95,7 @@ def guess_crop_tags(text):
     lower = text.lower()
     tags = []
     for canonical, aliases in CROP_ALIASES.items():
-        if any(a in lower for a in aliases):
+        if any(_alias_present(a, lower) for a in aliases):
             tags.append(canonical)
     return tags
 
@@ -115,13 +124,24 @@ def build_index():
     ids, texts, metadatas = [], [], []
     for doc in docs:
         chunks = chunk_text(doc["text"])
-        # Tag every chunk with the crops of the WHOLE document, not just
-        # the crops named in that chunk -- otherwise a short fertilizer or
-        # dose paragraph that doesn't repeat the crop name (e.g. lentil's
-        # one-line dose block) becomes unfindable by crop filter.
-        doc_crops = guess_crop_tags(doc["filename"] + " " + doc["text"])
+        # Crop tagging drives the crop_filter promotion at query time, so it
+        # must reflect what a doc is ABOUT -- not every crop it mentions in
+        # passing. A single-crop doc names its crop in the filename (e.g.
+        # `mustard.md`, `rice_boro_bamis.md`); trust that and ignore rotation
+        # asides like "fits between Aman and Boro rice" (which otherwise tag
+        # mustard/lentil/jute as `rice` too, making the `rice` filter match
+        # nearly everything and silently do nothing). A topic doc with no crop
+        # in its filename (the crop calendar, the FRG guide, soil/season notes)
+        # is legitimately multi-crop, so fall back to tagging by its content.
+        # Every chunk carries the whole doc's crops so a short dose paragraph
+        # that doesn't repeat the crop name stays findable by crop filter.
+        # Normalise separators first: whole-word matching treats "_" as a word
+        # character, so `\bjute\b` would miss "jute_cultivation.md".
+        filename_words = doc["filename"].replace("_", " ").replace("-", " ")
+        filename_crops = guess_crop_tags(filename_words)
+        doc_crops = sorted(filename_crops or guess_crop_tags(doc["text"]))
         for i, chunk in enumerate(chunks):
-            chunk_crops = sorted(set(doc_crops) | set(guess_crop_tags(chunk)))
+            chunk_crops = doc_crops
             ids.append(f"{doc['filename']}::{i}")
             texts.append(chunk)
             metadatas.append({
