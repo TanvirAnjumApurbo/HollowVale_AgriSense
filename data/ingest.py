@@ -62,10 +62,29 @@ def chunk_text(text, size=CHUNK_SIZE_CHARS, overlap=CHUNK_OVERLAP_CHARS):
     return chunks
 
 
+CROP_ALIASES = {
+    "rice": ["rice", "boro", "paddy", "aman", "aus"],
+    "wheat": ["wheat"],
+    "maize": ["maize"],
+    "potato": ["potato"],
+    "lentil": ["lentil", "masur"],
+    "jute": ["jute"],
+}
+
+
 def guess_crop_tags(text):
-    crops = ["rice", "boro", "wheat", "maize", "potato", "lentil", "masur", "jute"]
+    """Return canonical crop keys mentioned in the text.
+
+    Aliases are collapsed to the canonical key used by the financial
+    engine (e.g. 'boro'/'paddy' -> 'rice', 'masur' -> 'lentil') so the
+    crop_filter passed by the agent lines up with these tags.
+    """
     lower = text.lower()
-    return [c for c in crops if c in lower]
+    tags = []
+    for canonical, aliases in CROP_ALIASES.items():
+        if any(a in lower for a in aliases):
+            tags.append(canonical)
+    return tags
 
 
 def build_index():
@@ -86,14 +105,20 @@ def build_index():
     ids, texts, metadatas = [], [], []
     for doc in docs:
         chunks = chunk_text(doc["text"])
+        # Tag every chunk with the crops of the WHOLE document, not just
+        # the crops named in that chunk -- otherwise a short fertilizer or
+        # dose paragraph that doesn't repeat the crop name (e.g. lentil's
+        # one-line dose block) becomes unfindable by crop filter.
+        doc_crops = guess_crop_tags(doc["filename"] + " " + doc["text"])
         for i, chunk in enumerate(chunks):
+            chunk_crops = sorted(set(doc_crops) | set(guess_crop_tags(chunk)))
             ids.append(f"{doc['filename']}::{i}")
             texts.append(chunk)
             metadatas.append({
                 "source_file": doc["filename"],
                 "title": doc["title"],
                 "source_url": doc["source"],
-                "crops": ",".join(guess_crop_tags(chunk)) or "general",
+                "crops": ",".join(chunk_crops) or "general",
             })
 
     print(f"Embedding {len(texts)} chunks from {len(docs)} documents...")

@@ -8,16 +8,20 @@ matching client branch below -- the orchestrator only ever calls chat().
 
 import os
 
-try:
-    import streamlit as st
-    _SECRETS = st.secrets
-except Exception:
-    _SECRETS = {}
-
-
 def _get_secret(key, default=None):
-    if key in _SECRETS:
-        return _SECRETS[key]
+    """Look up a secret from Streamlit secrets first, then env vars.
+
+    st.secrets raises if no secrets.toml exists (even for a membership
+    check), so this is wrapped defensively -- the app must still run from
+    plain environment variables (e.g. a local .env, or a CI/cron context)
+    with no secrets file present.
+    """
+    try:
+        import streamlit as st
+        if key in st.secrets:
+            return st.secrets[key]
+    except Exception:
+        pass
     return os.environ.get(key, default)
 
 

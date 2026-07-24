@@ -7,6 +7,11 @@ from a real tool call, not the model's imagination.
 """
 
 import streamlit as st
+from dotenv import load_dotenv
+
+# Local dev convenience: load a local .env if present. On Streamlit Cloud
+# there is no .env -- credentials come from the Secrets manager instead.
+load_dotenv()
 
 from agent.orchestrator import run_turn
 from agent.prompts import missing_fields
