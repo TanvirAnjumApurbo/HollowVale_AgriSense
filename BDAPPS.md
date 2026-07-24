@@ -100,20 +100,24 @@ The code is done. These four steps need your account/portal access:
    BDAPPS_SIMULATE=false
    BDAPPS_APP_ID=<the key/ID bdapps issued in step 3>
    BDAPPS_APP_PASSWORD=<the password/secret bdapps issued>
-   BDAPPS_CHARGE_URL=<the charging endpoint from the portal docs>
+   BDAPPS_ACCOUNT_ID=<optional payment-instrument accountId, if the portal issues one>
+   BDAPPS_CHARGE_URL=<override only if not the documented Direct Debit endpoint>
    BDAPPS_PUBLIC_BASE_URL=https://<name>.onrender.com
    ```
    Redeploy. The outbound charge request is built and sent in
-   `bdapps/client.py::_charge_via_bdapps` — confirm its endpoint path and field
-   names against the portal doc and it's done.
+   `bdapps/client.py::_charge_via_bdapps`; `BDAPPS_CHARGE_URL` now defaults to
+   the documented `https://developer.bdapps.com/caas/direct/debit` endpoint.
 
-> **One thing to confirm from the portal docs** (I couldn't fetch
-> `dev.bdapps.com/API_Documentation/bdapps_tap_api.html` — it rendered
-> truncated): the exact **charge endpoint path, auth scheme, request field
-> names, and the ack body** `/bdapps/notify` must return. All of that is
-> isolated to `bdapps/client.py::_charge_via_bdapps` and the `notify` handler,
-> each marked with a `TODO(confirm)`. The simulator already mirrors the typical
-> bdapps `S1000` envelope, so wiring the real API is a localized edit.
+> **Contract status.** The charge **request/response** now follow the documented
+> bdapps CaaS `caas/direct/debit` (Direct Debit) schema — flat
+> `{applicationId, password, externalTrxId, subscriberId,
+> paymentInstrumentName:"MobileAccount", accountId?, amount, currency}` in, and
+> the `{externalTrxId, internalTrxId, referenceId, timeStamp, statusCode:"S1000",
+> statusDetail}` envelope out. The simulator mirrors that same envelope. Two
+> things the doc does **not** pin down and that stay isolated to
+> `bdapps/client.py::_charge_via_bdapps` / the `notify` handler: how `password`
+> is **encoded** (the sample is a 32-char value — we send the app password
+> as-is) and the exact **ack body** `/bdapps/notify` must return.
 
 ## Real vs. mock (for the README / judges)
 

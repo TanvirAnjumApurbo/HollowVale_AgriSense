@@ -34,8 +34,11 @@ class Settings:
     # simulate is False -- the simulator ignores them.
     app_id: str
     app_password: str
-    # The real bdapps charging endpoint. Filled in once confirmed from the
-    # portal docs; unused while simulate is True.
+    # Optional payment-instrument account id (documented ``accountId`` field).
+    # Sent only when set; unused while simulate is True.
+    account_id: str
+    # The real bdapps charging endpoint. Defaults to the documented Direct Debit
+    # path; override for a sandbox host. Unused while simulate is True.
     charge_url: str
     # Master switch. True => deterministic local simulator (default, demo-safe).
     simulate: bool
@@ -66,7 +69,10 @@ def get_settings():
     return Settings(
         app_id=os.environ.get("BDAPPS_APP_ID", ""),
         app_password=os.environ.get("BDAPPS_APP_PASSWORD", ""),
-        charge_url=os.environ.get("BDAPPS_CHARGE_URL", ""),
+        account_id=os.environ.get("BDAPPS_ACCOUNT_ID", ""),
+        charge_url=os.environ.get(
+            "BDAPPS_CHARGE_URL", "https://developer.bdapps.com/caas/direct/debit"
+        ),
         simulate=_env_bool("BDAPPS_SIMULATE", True),
         currency=os.environ.get("BDAPPS_CURRENCY", "BDT"),
         sim_initial_balance=_env_float("BDAPPS_SIM_INITIAL_BALANCE", 1000.0),

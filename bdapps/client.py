@@ -4,9 +4,14 @@
 runs a deterministic local model of a Direct Carrier Billing charge (validates
 the MSISDN, deducts from a seeded test balance, returns a bdapps-style status
 envelope). In live mode it delegates to ``_charge_via_bdapps`` -- the SINGLE
-place the real wire format lives, so wiring the sandbox to the real API is a
-one-function change once the exact endpoint/fields are confirmed from
-https://dev.bdapps.com/API_Documentation/bdapps_tap_api.html
+place the real wire format lives. The request/response shape follows the
+documented bdapps CaaS ``caas/direct/debit`` (Direct Debit) contract:
+
+    POST https://developer.bdapps.com/caas/direct/debit
+    req : {applicationId, password, externalTrxId, subscriberId,
+           paymentInstrumentName:"MobileAccount", accountId?, amount, currency?}
+    resp: {externalTrxId, internalTrxId, referenceId, timeStamp,
+           statusCode:"S1000", statusDetail:"Success."}
 """
 
 from __future__ import annotations
@@ -14,6 +19,7 @@ from __future__ import annotations
 import re
 import secrets
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 import requests
 
@@ -68,32 +74,24 @@ class BdappsCaasClient:
     # --- payload shared by the real call (documents the expected wire shape) ---
 
     def _build_charge_payload(self, msisdn, amount, currency, description, reference):
-        """The request body sent to bdapps. Field names follow the documented
-        CaaS/TAP direct-debit shape; adjust to match the portal exactly."""
+        """The ``caas/direct/debit`` request body, matching the documented bdapps
+        Direct Debit schema: flat fields, ``amount``/``currency`` as top-level
+        strings, and the exact ``"MobileAccount"`` instrument enum. ``accountId``
+        is optional and only sent when configured. ``description`` is not part of
+        the wire contract -- it is carried on the local receipt only."""
         canonical = normalize_msisdn(msisdn) or str(msisdn)
-        return {
+        payload = {
             "applicationId": self.settings.app_id,
             "password": self.settings.app_password,
             "externalTrxId": reference,
             "subscriberId": f"tel:{canonical}",
-            "paymentInstrumentName": "Mobile Account",
-            "amountTransaction": {
-                "referenceCode": reference,
-                "transactionOperationStatus": "Charged",
-                "paymentAmount": {
-                    "chargingInformation": {
-                        "amount": f"{float(amount):.2f}",
-                        "currency": currency,
-                        "description": description,
-                    },
-                    "chargingMetaData": {
-                        "onBehalfOf": "AgriSense AI",
-                        "purchaseCategoryCode": "Agri-Advisory",
-                        "channel": "WEB",
-                    },
-                },
-            },
+            "paymentInstrumentName": "MobileAccount",
+            "amount": _format_amount(amount),
+            "currency": currency or self.settings.currency,
         }
+        if self.settings.account_id:
+            payload["accountId"] = self.settings.account_id
+        return payload
 
     # --- live call: the ONLY place the real bdapps HTTP contract lives --------
 
@@ -108,9 +106,11 @@ class BdappsCaasClient:
                 raw_response={"error": "missing charge_url"},
             )
         try:
-            # TODO(confirm): exact endpoint path, auth scheme (app password vs
-            # bearer token / HMAC header) and JSON field names from the portal
-            # docs. Everything else in this package is provider-agnostic.
+            # Endpoint path and JSON field names now follow the documented
+            # caas/direct/debit contract. The one thing the doc shows but does
+            # not specify is how ``password`` is *encoded* (the sample is a
+            # 32-char value) -- we send the portal-issued app password as-is;
+            # swap in the encoding here if the portal requires a hash.
             resp = requests.post(
                 self.settings.charge_url,
                 json=payload,
@@ -178,19 +178,31 @@ class BdappsCaasClient:
 
     @staticmethod
     def _sim_envelope(status_code, reference, provider_ref):
+        """Mirror the documented Direct Debit response envelope so the visible
+        trace shows the same fields (externalTrxId/internalTrxId/referenceId/
+        timeStamp/statusCode/statusDetail) a real S1000 reply would carry."""
+        detail = {
+            STATUS_SUCCESS: "Success.",
+            STATUS_INSUFFICIENT: "Insufficient balance.",
+            STATUS_INVALID_MSISDN: "Invalid subscriber.",
+        }.get(status_code, "Error.")
         return {
+            "externalTrxId": reference,
+            "internalTrxId": "SIM" + secrets.token_hex(4).upper(),
+            "referenceId": provider_ref,
+            "timeStamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S%z"),
             "statusCode": status_code,
-            "statusDetail": {
-                STATUS_SUCCESS: "Success",
-                STATUS_INSUFFICIENT: "Insufficient balance",
-                STATUS_INVALID_MSISDN: "Invalid subscriber",
-            }.get(status_code, "Error"),
+            "statusDetail": detail,
             "simulated": True,
-            "amountTransaction": {
-                "referenceCode": reference,
-                "serverReferenceCode": provider_ref,
-            },
         }
+
+
+def _format_amount(amount):
+    """bdapps expects ``amount`` as a string. Send whole taka with no trailing
+    ``.00`` (matching the doc's ``"12345"`` sample) and keep two decimals only
+    when the amount is fractional."""
+    value = float(amount)
+    return str(int(value)) if value.is_integer() else f"{value:.2f}"
 
 
 def _safe_json(resp):
@@ -202,10 +214,12 @@ def _safe_json(resp):
 
 
 def _extract_provider_ref(body):
-    """Pull bdapps' server-side reference out of a (possibly nested) response."""
+    """Pull bdapps' server-side reference out of a (possibly nested) response.
+    ``referenceId`` is the documented Direct Debit reference; ``internalTrxId``
+    is bdapps' internal id -- prefer the former for the receipt."""
     if not isinstance(body, dict):
         return None
-    for key in ("serverReferenceCode", "internalTrxId", "transactionId"):
+    for key in ("referenceId", "internalTrxId", "serverReferenceCode", "transactionId"):
         if body.get(key):
             return str(body[key])
     txn = body.get("amountTransaction")
