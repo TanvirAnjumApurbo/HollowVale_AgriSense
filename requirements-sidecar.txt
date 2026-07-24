@@ -1,0 +1,11 @@
+# Lean dependency set for the bdapps CaaS sidecar (server.py) ONLY.
+#
+# Deliberately NOT -r requirements.txt: the sidecar needs none of Streamlit,
+# ChromaDB, onnxruntime, or OpenAI. Deploying with just these keeps the Render
+# build fast and immune to the heavy RAG deps failing to compile in the cloud.
+# server.py -> bdapps/* + tools.financials -> data.crop_loader (yaml). That's all.
+fastapi==0.139.2
+uvicorn[standard]==0.51.0
+requests==2.34.2
+pyyaml==6.0.3
+python-dotenv==1.2.2

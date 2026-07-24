@@ -6,12 +6,19 @@ raw returned values) so a judge can confirm each number in a plan came
 from a real tool call, not the model's imagination.
 """
 
+import os
+
+import requests
 import streamlit as st
 from dotenv import load_dotenv
 
 # Local dev convenience: load a local .env if present. On Streamlit Cloud
 # there is no .env -- credentials come from the Secrets manager instead.
 load_dotenv()
+
+# Base URL of the bdapps CaaS sidecar (server.py). The Streamlit app cannot
+# serve bdapps' inbound callbacks itself, so payments go through the sidecar.
+BDAPPS_SIDECAR_URL = os.environ.get("BDAPPS_SIDECAR_URL", "http://localhost:8000").rstrip("/")
 
 from agent.orchestrator import run_turn
 from agent.prompts import missing_fields
@@ -51,6 +58,53 @@ with st.sidebar:
             st.json(entry["arguments"])
             st.markdown("**Raw result:**")
             st.json(entry["result"])
+
+    st.divider()
+    with st.expander("💳 Pay via bdapps (CaaS sandbox)", expanded=False):
+        st.caption(
+            "Charging-as-a-Service demo. Sends a charge to the bdapps sidecar "
+            "(`server.py`); in simulate mode no real money or credentials are used."
+        )
+        proj = get_session_facts().get("projection") or {}
+        fert = (proj.get("cost_breakdown_bdt") or {}).get("fertilizer")
+        if fert:
+            st.caption(f"Tip: this plan's fertilizer input cost is {fert:.0f} BDT.")
+        pay_msisdn = st.text_input("Mobile number", value="01700000000", key="bdapps_msisdn")
+        pay_amount = st.number_input(
+            "Amount (BDT)", min_value=1.0, value=20.0, step=1.0, key="bdapps_amount"
+        )
+        pay_desc = st.text_input("For", value="AgriSense season advisory", key="bdapps_desc")
+        if st.button("Charge via bdapps", key="bdapps_charge"):
+            try:
+                resp = requests.post(
+                    f"{BDAPPS_SIDECAR_URL}/bdapps/checkout",
+                    json={
+                        "msisdn": pay_msisdn,
+                        "amount": float(pay_amount),
+                        "description": pay_desc,
+                    },
+                    timeout=20,
+                )
+                data = resp.json()
+            except Exception as exc:
+                st.error(
+                    f"Could not reach the bdapps sidecar at {BDAPPS_SIDECAR_URL}. "
+                    f"Is it running (`uvicorn server:app --port 8000`)? ({exc})"
+                )
+            else:
+                if data.get("status") == "CHARGED":
+                    st.success(
+                        f"Charged {data['amount']} {data['currency']} "
+                        f"({data['status_code']})"
+                    )
+                    if data.get("balance_after") is not None:
+                        st.caption(f"Balance after: {data['balance_after']} {data['currency']}")
+                    receipt = data.get("receipt_url", "")
+                    if receipt.startswith("/"):
+                        receipt = f"{BDAPPS_SIDECAR_URL}{receipt}"
+                    st.markdown(f"[View receipt]({receipt}) · ref `{data['reference']}`")
+                else:
+                    st.error(f"{data.get('status')}: {data.get('status_detail')}")
 
     st.divider()
     if st.button("Reset conversation"):

@@ -1,0 +1,30 @@
+# Cloudflare Tunnel config for exposing the bdapps CaaS sidecar publicly.
+#
+# This gives bdapps a STABLE https host address that points at the sidecar
+# running on your laptop (http://localhost:8000) -- no cloud deploy, and the
+# request/response logs stay in front of you during the demo.
+#
+# Two ways to run it:
+#
+# A) Quick tunnel (fastest, no domain, RANDOM url each run):
+#      cloudflared tunnel --url http://localhost:8000
+#    Copy the printed https://<random>.trycloudflare.com and paste
+#    <that>/bdapps/notify into the bdapps portal. Re-paste if you restart.
+#
+# B) Named tunnel (STABLE hostname, needs a domain on Cloudflare) -- use this
+#    file:
+#      cloudflared tunnel login
+#      cloudflared tunnel create agrisense
+#      cloudflared tunnel route dns agrisense agrisense.<your-domain>
+#      cloudflared tunnel --config deploy/cloudflared-config.yml run
+#
+# Copy this file to deploy/cloudflared-config.yml and fill in the placeholders.
+
+tunnel: <TUNNEL-UUID-FROM-create>
+credentials-file: C:\Users\User\.cloudflared\<TUNNEL-UUID>.json
+
+ingress:
+  - hostname: agrisense.<your-domain>
+    service: http://localhost:8000
+  # Everything else 404s.
+  - service: http_status:404

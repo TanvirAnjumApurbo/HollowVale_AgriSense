@@ -4,6 +4,10 @@ __pycache__/
 .env
 .streamlit/secrets.toml
 *.sqlite3
+
+# bdapps sidecar transaction store -- rebuilt on first run (see bdapps/store.py).
+data/bdapps.db
+data/bdapps.db-*
 .claude/
 
 # Built RAG index -- rebuilt from data/raw on first use (see data/ingest.py).

@@ -1,0 +1,44 @@
+# Render Blueprint for the bdapps CaaS sidecar.
+#
+# Deploy: push this repo to GitHub, then Render Dashboard -> New -> Blueprint,
+# pick the repo. Render reads this file, builds with the lean sidecar deps, and
+# starts uvicorn. You get a stable public URL: https://<name>.onrender.com
+#
+# After the first deploy, set the secret env vars (marked sync:false) in the
+# Render dashboard, and set BDAPPS_PUBLIC_BASE_URL to your onrender URL.
+services:
+  - type: web
+    name: agrisense-bdapps          # -> https://agrisense-bdapps.onrender.com (pick your own)
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements-sidecar.txt
+    startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.10"
+      # Keep the simulator ON until you've confirmed the real API fields.
+      - key: BDAPPS_SIMULATE
+        value: "true"
+      - key: BDAPPS_CURRENCY
+        value: BDT
+      - key: BDAPPS_SIM_INITIAL_BALANCE
+        value: "1000"
+      - key: BDAPPS_ADVISORY_FEE_BDT
+        value: "20"
+      # Set these in the dashboard after deploy (sync:false => not stored in git):
+      - key: BDAPPS_PUBLIC_BASE_URL      # e.g. https://agrisense-bdapps.onrender.com
+        sync: false
+      - key: BDAPPS_APP_ID
+        sync: false
+      - key: BDAPPS_APP_PASSWORD
+        sync: false
+      - key: BDAPPS_CHARGE_URL
+        sync: false
+      - key: BDAPPS_NOTIFY_TOKEN
+        sync: false
+
+# Note: the free plan spins down after ~15 min idle (first request cold-starts
+# ~50s) and its disk is ephemeral (the SQLite ledger resets on redeploy). Fine
+# for a sandbox demo; hit /healthz once to warm it before judging. For an
+# always-on instance with a persistent disk, upgrade the plan.
