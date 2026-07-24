@@ -1,13 +1,29 @@
 """System prompt construction and required-field tracking for farmer intake."""
 
+from datetime import date
+
+from tools.agronomy import SEASON_DISPLAY, infer_season
+
+# target_season is deliberately NOT here: the growing season is derived
+# deterministically from today's date (infer_season), not guessed by the LLM.
+# Asking the farmer led the model to mislabel it (e.g. Kharif-1 in late July),
+# which flipped the ranking. It stays an optional update_farmer_profile field
+# for a farmer who explicitly plans for a different future season.
 REQUIRED_FIELDS = {
     "location": "farm location (district/upazila/village in Bangladesh)",
     "farm_size_acres": "farm size in acres",
     "soil_type": "soil type (e.g. sandy, sandy loam, loam, clay loam, clay)",
     "water_availability": "water availability (e.g. low, medium, high / irrigation access)",
     "budget_bdt": "budget for the season, in BDT",
-    "target_season": "target growing season (e.g. Rabi, Kharif-1, Kharif-2, or a specific month range)",
 }
+
+
+def current_season_line(today=None):
+    """A deterministic 'today's date + current cropping season' statement for
+    the prompt, so the model never has to (mis)compute the season itself."""
+    today = today or date.today()
+    season = infer_season(today)
+    return today.isoformat(), SEASON_DISPLAY.get(season, season)
 
 
 def missing_fields(profile):
@@ -72,9 +88,26 @@ def _ranking_digest(ranking):
         f"season_used={_display(ranking.get('season_used'))}; "
         f"finalists={finalists or '(none returned)'}."
     )
+    # Per-finalist KB sources are attached to the ranking by the orchestrator
+    # (deterministic grounding); keep a compact citation line so later turns
+    # can still cite them without re-retrieving.
+    citation_bits = []
+    for entry in (ranking.get("knowledge_base") or [])[:3]:
+        titles = sorted({
+            source.get("source_title")
+            for source in (entry.get("sources") or [])
+            if source.get("source_title")
+        })
+        if titles:
+            citation_bits.append(f"{entry.get('crop')}: {', '.join(titles)}")
+    citation_line = (
+        "\nRanking KB sources (cite these) — " + "; ".join(citation_bits) + "."
+        if citation_bits
+        else ""
+    )
     # Context + the first three finalist reasons are enough for the required
     # three-candidate narration without reinjecting the whole raw ranking.
-    return summary_line + _reasons_digest("Ranking", ranking, limit=4)
+    return summary_line + citation_line + _reasons_digest("Ranking", ranking, limit=4)
 
 
 def _projection_digest(projection):
@@ -176,10 +209,14 @@ def build_system_prompt(profile, session_facts=None):
         else "(none -- all required fields are known)"
     )
     facts_digest = build_facts_digest(session_facts)
+    today_iso, season_disp = current_season_line()
 
     return f"""You are AgriSense AI, an agronomic advisor agent for smallholder farmers in Bangladesh.
 
 Your job is to take a farmer from a vague opening message to a grounded, explained, costed season plan, and to keep advising through the season. The LLM gathers inputs and narrates; tools decide rankings, dates, weather adjustments, and every number.
+
+## Current growing season (derived from today's date -- never compute it yourself)
+Today is {today_iso}. From that date, the current Bangladesh cropping season is **{season_disp}**. Use this as the growing season for recommendations unless the farmer explicitly asks to plan for a different future season or month range. Never infer the season from vague words like "now", "this season", or "current" -- it is already determined for you here, and `rank_crops` uses today's date directly.
 
 ## Required intake fields
 Currently known about this farmer:
@@ -191,6 +228,7 @@ Still missing:
 Rules for intake:
 - Call `update_farmer_profile` as soon as you learn any required field. If the farmer explicitly chooses a crop, record `chosen_crop` with that same tool.
 - Ask only for missing fields. Never re-ask for a known value.
+- Do not ask the farmer which season it is: it is fixed by today's date ({season_disp}, see above). Only record `target_season` if the farmer explicitly names a specific different season or month range to plan for.
 - Do not recommend crops or build a projection/calendar until intake is complete, unless the farmer explicitly refuses a field and you clearly state an assumption.
 
 ## Established facts (do not re-derive; quote these)
@@ -206,15 +244,16 @@ Established-fact rules:
 For a new recommendation, follow this chain:
 1. Complete intake.
 2. Call `get_weather` when no matching established weather exists. If established weather exists, call it only for cache-served daily detail or an explicit `refresh=true` request as described above.
-3. Call `rank_crops`; it receives the profile and established/live weather from application state, not from model-supplied numbers.
-4. Call `search_knowledge_base` once per finalist to ground agronomic claims and sources.
-5. Present at least three ranked finalists using the exact tool reasons, then let the farmer choose.
+3. Call `rank_crops`; it receives the profile and established/live weather from application state, not from model-supplied numbers. Its result includes a per-finalist `knowledge_base` block with the source(s) retrieved for that crop -- this grounding is done for you automatically.
+4. Cite those sources: for each finalist you present, quote its `source_title` and `source_url` from the ranking's `knowledge_base` block. You may also call `search_knowledge_base` yourself for extra depth on a finalist or a specific agronomic question.
+5. Present at least three ranked finalists using the exact tool reasons, each with a cited knowledge-base source, then let the farmer choose.
 6. Record the explicit choice. Obtain an explicit sowing/transplanting date in YYYY-MM-DD form; never invent one.
 7. Call `compute_financial_projection` and `build_season_calendar` for the chosen crop and requested acreage. The calendar receives established weather from application state.
 8. Narrate only from returned `reasons`, fields, calendar events, and cited retrieved evidence.
 
 ## Structural explainability rules
 - Every recommendation or agronomic/financial claim must quote at least one relevant entry verbatim from the `reasons` array of the tool result that produced it. Per-crop `ranked[*].reasons` entries also qualify.
+- When you present or recommend a crop, cite at least one knowledge-base source for it -- the `source_title` and `source_url` from the ranking's `knowledge_base` block, or from a `search_knowledge_base` result. Do not state agronomic facts (fertilizer doses, sowing windows, pest risks) without a cited source.
 - Do not paraphrase numbers or dates. Restate them exactly as returned by the producing tool or as shown in Established facts.
 - If a tool returned no relevant reason for a claim, do not make that claim.
 - Never perform arithmetic in the reply. Every numeric result must come from a tool.

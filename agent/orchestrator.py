@@ -307,6 +307,61 @@ def _persist_tool_facts(name, result, context):
         facts["calendar"] = result
 
 
+def _kb_crop_family(crop_key):
+    """Map a fine crop key (rice_boro/rice_aman/rice_aus) to the coarse KB
+    crop-tag family that search_knowledge_base's crop_filter expects. Every
+    non-rice key already equals its family (wheat, potato, ...)."""
+    key = str(crop_key or "")
+    return "rice" if key.startswith("rice") else key
+
+
+def _ground_finalists_with_kb(ranking, finalists=3, per_finalist=2):
+    """Retrieve KB evidence for the top finalists and fold it into the ranking.
+
+    This makes a recommendation source-grounded *deterministically*, in
+    application code -- not at the model's discretion. gpt-4o-mini routinely
+    skips the "search the KB per finalist" workflow step, so relying on the
+    prompt alone left recommendations uncited. Returns (citations, reasons):
+    citations is a per-finalist list of sources+snippets folded into the
+    ranking result the model reads; reasons are quotable grounding lines.
+    """
+    citations, reasons = [], []
+    for candidate in (ranking.get("ranked") or [])[:finalists]:
+        crop = candidate.get("crop")
+        label = candidate.get("label") or crop
+        family = _kb_crop_family(crop)
+        query = f"{label}: fertilizer dose, sowing window, soil suitability and pest risk"
+        kb = search_knowledge_base(query, crop_filter=family)
+        hits = (kb.get("results") or [])[:per_finalist]
+        sources = [
+            {
+                "source_title": hit.get("source_title"),
+                "source_file": hit.get("source_file"),
+                "source_url": hit.get("source_url"),
+            }
+            for hit in hits
+        ]
+        citations.append({
+            "crop": crop,
+            "query": query,
+            "crop_filter_applied": kb.get("crop_filter_applied"),
+            "sources": sources,
+            "evidence": [(hit.get("text") or "")[:400] for hit in hits],
+        })
+        if sources:
+            named = "; ".join(
+                f"{s['source_title']} ({s['source_url']})"
+                for s in sources
+                if s.get("source_title")
+            ) or "the knowledge base"
+            reasons.append(
+                f"KB grounding for {crop}: {len(hits)} passage(s) retrieved from {named}."
+            )
+        elif kb.get("error"):
+            reasons.append(f"KB grounding for {crop} unavailable: {kb['error']}.")
+    return citations, reasons
+
+
 def _execute_tool(name, args, context):
     context["session_facts"] = _ensure_fact_shape(
         context.get("session_facts")
@@ -370,11 +425,22 @@ def _execute_tool(name, args, context):
         return search_knowledge_base(args["query"], crop_filter=args.get("crop_filter"))
     if name == "rank_crops":
         # Profile + forecast are injected from live state, not from LLM args.
-        return rank_crops(
+        ranking = rank_crops(
             context["farmer_profile"],
             context.get("last_weather"),
             top_n=int(args.get("top_n") or 5),
         )
+        # Deterministic RAG grounding: retrieve KB evidence per finalist and
+        # fold it into the ranking result the model reads, so a recommendation
+        # carries source citations without depending on the model to call the
+        # knowledge base itself. Folded in (not a separate tool call) so the
+        # visible trace stays one rank_crops entry that now shows its sources.
+        if isinstance(ranking, dict) and not ranking.get("error") and ranking.get("ranked"):
+            citations, kb_reasons = _ground_finalists_with_kb(ranking)
+            ranking["knowledge_base"] = citations
+            if kb_reasons:
+                ranking.setdefault("reasons", []).extend(kb_reasons)
+        return ranking
     if name == "compute_financial_projection":
         return compute_financial_projection(
             args["crop"],
