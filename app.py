@@ -36,6 +36,59 @@ from memory.session_store import (
 st.set_page_config(page_title="AgriSense AI", page_icon="🌾", layout="wide")
 init_session()
 
+# Layout polish the theme config (.streamlit/config.toml) cannot express.
+# Only stable selectors are used: data-testid attributes and the st-key-*
+# classes Streamlit derives from widget/container keys -- never generated
+# class names.
+st.markdown(
+    """
+    <style>
+    /* Centered, readable conversation column (ChatGPT-style width) */
+    [data-testid="stMainBlockContainer"] {
+        max-width: 52rem;
+        padding-top: 2.2rem;
+        margin: 0 auto;
+    }
+    /* Chat bubbles: light card feel */
+    [data-testid="stChatMessage"] {
+        padding: 0.9rem 1.1rem;
+        border-radius: 0.9rem;
+    }
+    /* Sidebar chat list: left-aligned single-line entries with ellipsis */
+    .st-key-chat_list button {
+        justify-content: flex-start !important;
+    }
+    .st-key-chat_list button p {
+        max-width: 15rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    /* Pin the account row to the sidebar bottom when there is room.
+       If these selectors ever stop matching, the row simply sits after
+       the other sections -- a graceful degradation. */
+    [data-testid="stSidebarUserContent"] > [data-testid="stVerticalBlock"] {
+        min-height: calc(100vh - 6rem);
+    }
+    .st-key-user_section {
+        margin-top: auto;
+    }
+    /* Login: centered constrained card */
+    .st-key-login_card {
+        max-width: 26rem;
+        margin: 0 auto;
+    }
+    .st-key-login_card h1 {
+        text-align: center;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# Chat avatars (branding): the agent is the crop, the farmer is the person.
+AVATARS = {"assistant": "🌾", "user": "🧑‍🌾"}
+
 # Best-effort Neon persistence bootstrap. ensure_schema() is idempotent,
 # latches after the first success, and backs off after failures, so this
 # per-rerun call is effectively free. A missing/unreachable database leaves
@@ -94,6 +147,13 @@ def _resolve_user():
 
 
 def _login_screen():
+    login_card = st.container(key="login_card")
+    with login_card:
+        _login_card_body()
+    st.stop()
+
+
+def _login_card_body():
     st.title("🌾 AgriSense AI")
     st.caption("Sign in to build grounded, costed season plans for your farm.")
 
@@ -141,7 +201,6 @@ def _login_screen():
                     _establish_session(user)
                 else:
                     st.error(error)
-    st.stop()
 
 
 current_user = _resolve_user()
@@ -206,50 +265,54 @@ if _is_persistent and "active_conversation_id" not in st.session_state:
         _start_new_chat()
 
 with st.sidebar:
-    account_col, logout_col = st.columns([3, 1])
-    account_col.markdown(f"👤 **{current_user['username']}**")
-    if logout_col.button("Log out", key="logout_btn"):
-        _logout()
-    st.divider()
+    st.markdown("## 🌾 AgriSense AI")
+    st.caption("Agentic season planning for Bangladeshi farmers")
 
-    if st.button("➕ New chat", use_container_width=True, key="new_chat_btn"):
+    if st.button(
+        "➕ New chat", type="primary", use_container_width=True, key="new_chat_btn"
+    ):
         _start_new_chat()
         st.rerun()
-    if _is_persistent:
-        chat_rows = convs.list_conversations(current_user["id"])
-        active_id = st.session_state.get("active_conversation_id")
-        for row in chat_rows:
-            is_active = row["id"] == active_id
-            label = ("🟢 " if is_active else "") + (row["title"] or "New chat")
-            if st.button(
-                label,
-                key=f"conv_{row['id']}",
-                use_container_width=True,
-                disabled=is_active,
-            ):
-                if _load_conversation(row["id"]):
-                    st.rerun()
-                else:
-                    st.toast("⚠️ Could not open that conversation.")
-        if not chat_rows:
-            st.caption("No saved chats yet — send a message to start one.")
-    else:
-        st.caption("Guest mode: chats are not saved.")
+
+    with st.container(key="chat_list"):
+        if _is_persistent:
+            chat_rows = convs.list_conversations(current_user["id"])
+            active_id = st.session_state.get("active_conversation_id")
+            if chat_rows:
+                st.caption("Recent chats")
+            for row in chat_rows:
+                is_active = row["id"] == active_id
+                label = ("🟢 " if is_active else "") + (row["title"] or "New chat")
+                if st.button(
+                    label,
+                    key=f"conv_{row['id']}",
+                    type="tertiary",
+                    use_container_width=True,
+                    disabled=is_active,
+                ):
+                    if _load_conversation(row["id"]):
+                        st.rerun()
+                    else:
+                        st.toast("⚠️ Could not open that conversation.")
+            if not chat_rows:
+                st.caption("No saved chats yet — send a message to start one.")
+        else:
+            st.caption("Guest mode: chats are not saved.")
+
     st.divider()
 
     profile = get_farmer_profile()
-    st.subheader("🧑‍🌾 Farmer profile")
-    if profile:
-        for k, v in profile.items():
-            st.write(f"**{k}**: {v}")
-    else:
-        st.write("_(nothing known yet)_")
-    still_missing = missing_fields(profile)
-    if still_missing:
-        st.caption("Still missing: " + ", ".join(still_missing))
-    st.caption("Weather data: [Open-Meteo](https://open-meteo.com/)")
+    with st.expander("🧑‍🌾 Farmer profile", expanded=False):
+        if profile:
+            for k, v in profile.items():
+                st.write(f"**{k}**: {v}")
+        else:
+            st.write("_(nothing known yet)_")
+        still_missing = missing_fields(profile)
+        if still_missing:
+            st.caption("Still missing: " + ", ".join(still_missing))
+        st.caption("Weather data: [Open-Meteo](https://open-meteo.com/)")
 
-    st.divider()
     with st.expander("💳 Pay via bdapps (CaaS sandbox)", expanded=False):
         st.caption(
             "Charging-as-a-Service demo. Sends a charge to the bdapps sidecar "
@@ -295,6 +358,13 @@ with st.sidebar:
                     st.markdown(f"[View receipt]({receipt}) · ref `{data['reference']}`")
                 else:
                     st.error(f"{data.get('status')}: {data.get('status_detail')}")
+
+    with st.container(key="user_section"):
+        st.divider()
+        account_col, logout_col = st.columns([3, 2])
+        account_col.markdown(f"👤 **{current_user['username']}**")
+        if logout_col.button("Log out", key="logout_btn", use_container_width=True):
+            _logout()
 
 st.title("🌾 AgriSense AI")
 st.caption("From a vague opening message to a grounded, explained, costed season plan.")
@@ -368,7 +438,7 @@ def _render_turn_trace(trace):
 _turn_traces = get_turn_traces()
 _assistant_idx = 0
 for msg in get_conversation_history():
-    with st.chat_message(msg["role"]):
+    with st.chat_message(msg["role"], avatar=AVATARS.get(msg["role"])):
         if msg["role"] == "assistant":
             if _assistant_idx < len(_turn_traces) and _turn_traces[_assistant_idx]:
                 _render_turn_trace(_turn_traces[_assistant_idx])
@@ -376,7 +446,7 @@ for msg in get_conversation_history():
         st.markdown(msg["content"])
 
 if not get_conversation_history():
-    with st.chat_message("assistant"):
+    with st.chat_message("assistant", avatar=AVATARS["assistant"]):
         st.markdown(
             "Hi, I'm AgriSense AI. Tell me a bit about your farm -- where it is, "
             "how big it is, and what you're hoping to plant -- and I'll help you "
@@ -394,9 +464,9 @@ if user_input:
     # Echo the user's message immediately, then run the agent inside a live
     # status block in the assistant's message: tool calls appear as they
     # execute (see _LiveTrace), and the block collapses when the turn ends.
-    with st.chat_message("user"):
+    with st.chat_message("user", avatar=AVATARS["user"]):
         st.markdown(user_input)
-    with st.chat_message("assistant"):
+    with st.chat_message("assistant", avatar=AVATARS["assistant"]):
         status = st.status("🤖 Agent working…", expanded=True)
         turn_trace = _LiveTrace(status)
         turn_failed = False

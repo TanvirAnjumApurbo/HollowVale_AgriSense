@@ -1,0 +1,22 @@
+# AgriSense theme -- coherent agricultural green palette, light base.
+# Native Streamlit theming does most of the branding work; app.py adds only
+# a small CSS block for layout details the theme config cannot express.
+
+[theme]
+base = "light"
+primaryColor = "#2E7D32"            # deep agri green (buttons, accents, focus)
+backgroundColor = "#FBFBF7"         # warm off-white paper
+secondaryBackgroundColor = "#F0F4EC" # inputs, chat bubbles, cards
+textColor = "#1A2E1D"               # near-black green for AA contrast
+linkColor = "#2E7D32"
+codeBackgroundColor = "#EDF2E8"
+borderColor = "#DCE5D8"
+baseRadius = "0.6rem"
+font = "sans-serif"
+
+[theme.sidebar]
+backgroundColor = "#F3F7F0"
+secondaryBackgroundColor = "#E6EFE2"
+
+[server]
+headless = true
