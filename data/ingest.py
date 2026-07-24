@@ -68,6 +68,7 @@ CROP_ALIASES = {
     "potato": ["potato"],
     "lentil": ["lentil", "masur"],
     "jute": ["jute"],
+    "mustard": ["mustard", "sarisha", "rapeseed", "canola"],
 }
 
 

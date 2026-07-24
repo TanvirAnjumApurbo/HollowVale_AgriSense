@@ -32,3 +32,9 @@ Crop: Boro Paddy (winter/dry-season rice)
 
 ## Water Need
 High — this is a flood-irrigated crop; not suitable where water availability is limited unless supplemental irrigation is reliable.
+
+## Harvest & Post-Harvest
+Boro matures about 145-160 days after transplanting; harvest at 80-85% golden grain, typically late April to May. Harvest promptly before pre-monsoon (Kalbaishakhi) storms to avoid lodging and grain shattering.
+
+## Soil Suitability
+Best on clay and clay-loam soils that hold irrigation water; loam is workable where irrigation is reliable. Sandy and sandy-loam soils drain too fast for a flood-irrigated crop and are a poor fit unless irrigation is very reliable.

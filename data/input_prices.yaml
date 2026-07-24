@@ -1,0 +1,19 @@
+# Fertilizer input prices — BDT per kg of actual fertilizer MATERIAL
+# (not per kg of nutrient). Bangladesh retail/dealer ranges, 2024-25.
+# Urea/TSP/MoP track the government-set dealer rates; gypsum, zinc,
+# boron and magnesium are open-market retail.
+#
+# These keys are referenced by `input:` in data/crops.yaml. The financial
+# engine derives each crop's fertilizer cost as
+#     sum(kg_per_acre * price)  over the fertilizer_schedule,
+# so this file is the single source of truth for fertilizer pricing and
+# the demo's fertilizer numbers are inspectable rather than a flat guess.
+
+urea: 27               # 46% N
+tsp: 30                # Triple Super Phosphate (~46% P2O5)
+mp: 25                 # Muriate of Potash / MoP (~60% K2O)
+dap: 40                # Di-Ammonium Phosphate (18% N, 46% P2O5)
+gypsum: 15             # sulphur source (~18% S)
+zinc_sulphate: 120     # micronutrient (Zn)
+boric_acid: 250        # micronutrient (B)
+magnesium_sulphate: 35 # MgSO4 (Mg + S)

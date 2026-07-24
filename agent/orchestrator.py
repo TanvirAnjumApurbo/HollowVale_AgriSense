@@ -13,7 +13,8 @@ from agent.llm import chat
 from agent.prompts import build_system_prompt, missing_fields
 from tools.weather import get_weather_for_location
 from tools.knowledge_base import search_knowledge_base
-from tools.financials import compute_financial_projection, rank_candidate_crops
+from tools.financials import compute_financial_projection
+from tools.agronomy import rank_crops
 
 MAX_TOOL_ITERATIONS = 12
 
@@ -68,15 +69,23 @@ TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
-            "name": "rank_candidate_crops",
-            "description": "Get a deterministic profit/ROI snapshot across candidate crops for the farm's area, to use as the financial basis for ranking crop candidates. Combine this with search_knowledge_base for suitability/risk grounding.",
+            "name": "rank_crops",
+            "description": (
+                "Score and rank ALL candidate crops for THIS farm using the recorded farmer profile "
+                "(soil, area, water availability, budget, target season) and the latest weather forecast "
+                "you fetched -- you do not pass these, the agent supplies them. Returns, per crop, a 0-1 "
+                "overall suitability score plus soil_fit/season_fit/water_fit/temp_fit/profit_score components, "
+                "an economics block, a budget flag (with max affordable area), and a `reasons` list that already "
+                "explains each score in plain language with the exact input values used. NARRATE those reasons; "
+                "do not invent your own suitability judgement or numbers. It is season-aware: for today's date it "
+                "knows which crops are actually plantable now (e.g. Aman rice in Kharif-2), so trust its ranking "
+                "over generic crop knowledge. Call get_weather BEFORE this so the water/temp scores use real data."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "area_acres": {"type": "number", "description": "Farm size in acres."},
-                    "water_availability": {"type": "string", "description": "Farmer's water availability, used to flag irrigation risk."},
+                    "top_n": {"type": "integer", "description": "How many top crops to return in detail. Default 5."},
                 },
-                "required": ["area_acres"],
             },
         },
     },
@@ -88,7 +97,7 @@ TOOL_SCHEMAS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "crop": {"type": "string", "description": "Crop key, e.g. rice, wheat, maize, potato, lentil, jute."},
+                    "crop": {"type": "string", "description": "Crop key: rice_boro, rice_aman, wheat, maize, potato, lentil, jute, or mustard (aliases rice/boro/aman/masur also accepted)."},
                     "area_acres": {"type": "number", "description": "Area in acres."},
                     "yield_adjustment_pct": {"type": "number", "description": "Optional % adjustment to expected yield, for scenario questions (e.g. -30 for a 30% rainfall/yield drop). Default 0."},
                     "price_override": {"type": "number", "description": "Optional override for the market price per unit, for scenario questions."},
@@ -100,15 +109,25 @@ TOOL_SCHEMAS = [
 ]
 
 
-def _execute_tool(name, args):
+def _execute_tool(name, args, context):
     if name == "update_farmer_profile":
         return {"updated_fields": {k: v for k, v in args.items() if v is not None}}
     if name == "get_weather":
-        return get_weather_for_location(args["location"])
+        result = get_weather_for_location(args["location"])
+        # Cache the real forecast so rank_crops can score water/temp against it
+        # instead of trusting numbers relayed (and possibly fudged) by the LLM.
+        if "error" not in result:
+            context["last_weather"] = result
+        return result
     if name == "search_knowledge_base":
         return search_knowledge_base(args["query"], crop_filter=args.get("crop_filter"))
-    if name == "rank_candidate_crops":
-        return rank_candidate_crops(args["area_acres"], water_availability=args.get("water_availability"))
+    if name == "rank_crops":
+        # Profile + forecast are injected from live state, not from LLM args.
+        return rank_crops(
+            context["farmer_profile"],
+            context.get("last_weather"),
+            top_n=int(args.get("top_n") or 5),
+        )
     if name == "compute_financial_projection":
         return compute_financial_projection(
             args["crop"],
@@ -135,6 +154,11 @@ def run_turn(conversation_history, user_message, farmer_profile, trace_log):
     messages = [{"role": "system", "content": build_system_prompt(farmer_profile)}]
     messages.extend(conversation_history)
     messages.append({"role": "user", "content": user_message})
+
+    # Per-turn tool context: the live profile (mutated by update_farmer_profile)
+    # and the most recent real forecast, so rank_crops scores against injected
+    # state rather than LLM-supplied arguments.
+    context = {"farmer_profile": farmer_profile, "last_weather": None}
 
     for i in range(MAX_TOOL_ITERATIONS):
         # On the final pass, withhold the tools so the model is forced to
@@ -171,7 +195,7 @@ def run_turn(conversation_history, user_message, farmer_profile, trace_log):
             except json.JSONDecodeError:
                 args = {}
 
-            result = _execute_tool(name, args)
+            result = _execute_tool(name, args, context)
 
             if name == "update_farmer_profile":
                 for k, v in args.items():

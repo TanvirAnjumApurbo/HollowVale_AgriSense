@@ -33,3 +33,12 @@ Generally 2-3 irrigations:
 
 ## Water Need
 Low-to-medium — wheat is grown in the dry Rabi season with only 2-3 irrigations needed, making it a reasonable choice where water availability is limited compared to Boro rice.
+
+## Harvest & Post-Harvest
+Wheat matures about 105-115 days after sowing; harvest when the grain is hard and the straw is golden, usually mid-March. Harvest promptly — a late-season heat spell during grain-fill shrivels the grain and cuts yield.
+
+## Soil Suitability
+Best on well-drained loam and clay-loam soils. Heavy waterlogged clay and very sandy soils are weaker fits, and wheat does not tolerate standing water. A cool, dry spell through grain-fill gives the best yield.
+
+## Additional Pest Note
+Besides rats, aphids can colonise the spikes in cool, humid spells late in the season; treat with Imidacloprid only if colonies cross the action threshold.

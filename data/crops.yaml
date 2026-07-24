@@ -1,0 +1,352 @@
+# AgriSense — machine-readable crop layer (Layer A).
+#
+# This file drives the deterministic tools (agronomy scoring + financial
+# projection). The prose corpus in data/raw/*.md (Layer B) drives RAG and
+# citations. Keeping them separate is what makes the recommendation
+# deterministic: the numbers below never come from the LLM.
+#
+# UNITS & CONVERSIONS (get these wrong and every number is wrong):
+#   * Fertilizer/seed doses are per ACRE.
+#   * BAMIS package-&-practice tables give kg per BIGHA. 1 bigha = 0.33 acre,
+#     so kg/acre = kg/bigha x 3.  (rice_boro, rice_aman below.)
+#   * BARC/BARI/DAE tables give kg per HECTARE. 1 ha = 2.471 acre,
+#     so kg/acre = kg/ha / 2.471 ~= kg/ha x 0.405.  (wheat, maize, potato,
+#     lentil, jute, mustard below.)
+#   * Organic manure / cow dung is applied in practice but is farmer-supplied
+#     and NOT priced in the schedule, so it is described in the prose corpus
+#     rather than the costed fertilizer_schedule.
+#
+# fertilizer_schedule doses are in kg/acre of MATERIAL (Urea, TSP, MoP, ...);
+# `input` keys match data/input_prices.yaml so cost is derived, not hardcoded.
+#
+# soil_suitability is a 0-1 fit per soil texture class (used directly as the
+# soil_fit component score). sowing_window is MM-DD (season, not a fixed year).
+# temp_range_c is the comfortable growing band; forecast temps outside it cut
+# the temp_fit score. water_requirement_mm is the whole-season crop water need.
+
+rice_boro:
+  label: "Boro Rice (HYV, dry-season irrigated)"
+  seasons: [rabi]
+  sowing_window: {start: "11-15", end: "12-31"}   # transplanting window
+  duration_days: 145
+  soil_suitability: {clay: 1.0, clay_loam: 1.0, loam: 0.8, sandy_loam: 0.5, sandy: 0.2}
+  water_requirement_mm: 1000
+  temp_range_c: {min: 18, max: 35}
+  yield_per_acre_kg: 2400
+  price_per_kg_bdt: 28
+  seed_kg_per_acre: 18
+  seed_price_per_kg_bdt: 55
+  labour_bdt_per_acre: 10000
+  irrigation_bdt_per_acre: 5000        # flood-irrigated, diesel/electric pump — the biggest cost driver
+  fertilizer_schedule:      # BAMIS lowland Boro kg/bigha x3 -> kg/acre
+    - {day: 0,  input: tsp,           kg_per_acre: 39,  note: "basal at land prep"}
+    - {day: 0,  input: mp,            kg_per_acre: 66,  note: "basal at land prep"}
+    - {day: 0,  input: gypsum,        kg_per_acre: 45,  note: "basal at land prep"}
+    - {day: 0,  input: zinc_sulphate, kg_per_acre: 4.5, note: "basal at land prep"}
+    - {day: 22, input: urea,          kg_per_acre: 40,  note: "1st top dressing, tillering (20-25 DAT)"}
+    - {day: 45, input: urea,          kg_per_acre: 40,  note: "2nd split"}
+    - {day: 65, input: urea,          kg_per_acre: 40,  note: "before panicle initiation"}
+  irrigation:
+    - {stage: "establishment",     day_from: 0,  day_to: 15,  depth_cm: 3}
+    - {stage: "tillering-flower",  day_from: 15, day_to: 90,  depth_cm: 5}
+    - {stage: "grain-fill",        day_from: 90, day_to: 120, depth_cm: 3}
+  pest_windows:
+    - {pest: "Yellow stem borer", day_from: 30, day_to: 60,
+       sign: "dead hearts in vegetative stage, whiteheads at heading",
+       control: "Carbofuran/Cartap/Fipronil at first dead-hearts", cost_bdt_per_acre: 900}
+    - {pest: "Brown plant hopper", day_from: 60, day_to: 95,
+       sign: "hopperburn — drying patches at tiller base",
+       control: "Imidacloprid; drain field and widen spacing", cost_bdt_per_acre: 700}
+  stages:
+    - {name: "Land preparation",   day_from: -12, day_to: 0}
+    - {name: "Transplanting",      day_from: 0,   day_to: 3}
+    - {name: "Tillering",          day_from: 3,   day_to: 45}
+    - {name: "Panicle initiation", day_from: 45,  day_to: 70}
+    - {name: "Flowering",          day_from: 70,  day_to: 95}
+    - {name: "Grain-fill & maturity", day_from: 95, day_to: 145}
+  sources:
+    - "https://www.bamis.gov.bd/en/croppnp/1/all/75/"
+
+rice_aman:
+  label: "Transplanted Aman Rice (monsoon, mostly rainfed)"
+  seasons: [kharif_2]
+  sowing_window: {start: "07-15", end: "08-15"}   # T. Aman transplanting window
+  duration_days: 130
+  soil_suitability: {clay: 1.0, clay_loam: 1.0, loam: 0.8, sandy_loam: 0.5, sandy: 0.3}
+  water_requirement_mm: 700
+  temp_range_c: {min: 20, max: 36}
+  yield_per_acre_kg: 1800
+  price_per_kg_bdt: 30
+  seed_kg_per_acre: 15
+  seed_price_per_kg_bdt: 50
+  labour_bdt_per_acre: 9000
+  irrigation_bdt_per_acre: 1500        # mostly rainfed; only supplemental irrigation in dry spells
+  fertilizer_schedule:      # BAMIS T. Aman kg/bigha x3 -> kg/acre (lower N than Boro)
+    - {day: 0,  input: tsp,    kg_per_acre: 33, note: "basal at land prep"}
+    - {day: 0,  input: mp,     kg_per_acre: 30, note: "basal at land prep"}
+    - {day: 0,  input: gypsum, kg_per_acre: 24, note: "basal at land prep"}
+    - {day: 15, input: urea,   kg_per_acre: 30, note: "1st top dressing"}
+    - {day: 35, input: urea,   kg_per_acre: 30, note: "2nd top dressing, max tillering"}
+    - {day: 55, input: urea,   kg_per_acre: 30, note: "3rd top before panicle initiation"}
+  irrigation:
+    - {stage: "establishment", day_from: 0,  day_to: 20, depth_cm: 3, note: "supplemental if monsoon breaks"}
+    - {stage: "reproductive",  day_from: 60, day_to: 95, depth_cm: 4, note: "critical — keep saturated at flowering"}
+  pest_windows:
+    - {pest: "Yellow stem borer", day_from: 30, day_to: 60,
+       sign: "dead hearts / whiteheads", control: "Cartap or Fipronil", cost_bdt_per_acre: 900}
+    - {pest: "Brown plant hopper", day_from: 55, day_to: 90,
+       sign: "hopperburn patches", control: "Imidacloprid; drain field", cost_bdt_per_acre: 700}
+    - {pest: "Gall midge", day_from: 25, day_to: 50,
+       sign: "silver-shoot / onion-leaf tubes", control: "Carbofuran granules", cost_bdt_per_acre: 500}
+  stages:
+    - {name: "Seedbed",            day_from: -25, day_to: 0}
+    - {name: "Transplanting",      day_from: 0,   day_to: 3}
+    - {name: "Tillering",          day_from: 3,   day_to: 45}
+    - {name: "Panicle initiation", day_from: 45,  day_to: 65}
+    - {name: "Flowering",          day_from: 65,  day_to: 90}
+    - {name: "Grain-fill & maturity", day_from: 90, day_to: 130}
+  sources:
+    - "https://www.bamis.gov.bd/en/croppnp/1/all/74/"
+    - "http://www.brri.gov.bd/"
+
+wheat:
+  label: "Wheat (Rabi)"
+  seasons: [rabi]
+  sowing_window: {start: "11-15", end: "12-15"}
+  duration_days: 110
+  soil_suitability: {loam: 1.0, clay_loam: 0.9, sandy_loam: 0.8, clay: 0.6, sandy: 0.5}
+  water_requirement_mm: 350
+  temp_range_c: {min: 10, max: 30}     # cool-season crop; heat >30C at grain-fill hurts
+  yield_per_acre_kg: 1400
+  price_per_kg_bdt: 35
+  seed_kg_per_acre: 48
+  seed_price_per_kg_bdt: 45
+  labour_bdt_per_acre: 6000
+  irrigation_bdt_per_acre: 2000        # only 2-3 irrigations
+  fertilizer_schedule:      # BAMIS wheat kg/ha / 2.471 -> kg/acre
+    - {day: 0,  input: tsp,    kg_per_acre: 57, note: "basal at final land prep"}
+    - {day: 0,  input: mp,     kg_per_acre: 42, note: "basal at final land prep"}
+    - {day: 0,  input: gypsum, kg_per_acre: 47, note: "basal at final land prep"}
+    - {day: 0,  input: urea,   kg_per_acre: 60, note: "~2/3 urea basal"}
+    - {day: 20, input: urea,   kg_per_acre: 40, note: "top dressing at 1st (CRI) irrigation, 17-21 DAS"}
+  irrigation:
+    - {stage: "crown-root",  day_from: 17, day_to: 25,  depth_cm: 5}
+    - {stage: "tillering",   day_from: 50, day_to: 55,  depth_cm: 5}
+    - {stage: "grain-fill",  day_from: 75, day_to: 80,  depth_cm: 5}
+  pest_windows:
+    - {pest: "Aphid", day_from: 55, day_to: 90,
+       sign: "colonies on spikes/leaves in cool humid spells, sticky honeydew",
+       control: "Imidacloprid if threshold crossed", cost_bdt_per_acre: 500}
+    - {pest: "Rat", day_from: 0, day_to: 110,
+       sign: "cut tillers, burrows at field edge",
+       control: "Traps or zinc-phosphide bait", cost_bdt_per_acre: 300}
+  stages:
+    - {name: "Sowing",        day_from: 0,   day_to: 3}
+    - {name: "Crown-root (CRI)", day_from: 17, day_to: 25}
+    - {name: "Tillering",     day_from: 25,  day_to: 55}
+    - {name: "Booting-heading", day_from: 55, day_to: 75}
+    - {name: "Grain-fill",    day_from: 75,  day_to: 100}
+    - {name: "Maturity",      day_from: 100, day_to: 110}
+  sources:
+    - "https://www.bamis.gov.bd/en/croppnp/1/all/9/"
+
+maize:
+  label: "Maize (Rabi / Kharif-1)"
+  seasons: [rabi, kharif_1]
+  sowing_window: {start: "10-15", end: "11-15"}   # primary (higher-yield) Rabi window
+  duration_days: 115
+  soil_suitability: {loam: 1.0, clay_loam: 0.9, sandy_loam: 0.8, sandy: 0.6, clay: 0.5}
+  water_requirement_mm: 500
+  temp_range_c: {min: 15, max: 35}
+  yield_per_acre_kg: 3500
+  price_per_kg_bdt: 24
+  seed_kg_per_acre: 8
+  seed_price_per_kg_bdt: 300           # hybrid maize seed is expensive
+  labour_bdt_per_acre: 7000
+  irrigation_bdt_per_acre: 2500
+  fertilizer_schedule:      # BAMIS maize Rabi kg/ha / 2.471 -> kg/acre
+    - {day: 0,  input: tsp,           kg_per_acre: 77,  note: "basal at final land prep"}
+    - {day: 0,  input: mp,            kg_per_acre: 49,  note: "basal at final land prep"}
+    - {day: 0,  input: gypsum,        kg_per_acre: 63,  note: "basal at final land prep"}
+    - {day: 0,  input: zinc_sulphate, kg_per_acre: 5,   note: "basal at final land prep"}
+    - {day: 0,  input: boric_acid,    kg_per_acre: 2.4, note: "basal at final land prep"}
+    - {day: 0,  input: urea,          kg_per_acre: 34,  note: "1/3 urea basal"}
+    - {day: 27, input: urea,          kg_per_acre: 34,  note: "1st top, 25-30 days after germination"}
+    - {day: 45, input: urea,          kg_per_acre: 33,  note: "2nd top, 40-50 days after germination"}
+  irrigation:
+    - {stage: "establishment", day_from: 15, day_to: 20, depth_cm: 5}
+    - {stage: "knee-high",     day_from: 30, day_to: 35, depth_cm: 5}
+    - {stage: "tasseling",     day_from: 60, day_to: 70, depth_cm: 5}
+    - {stage: "grain-fill",    day_from: 85, day_to: 89, depth_cm: 5}
+  pest_windows:
+    - {pest: "Fall armyworm", day_from: 15, day_to: 50,
+       sign: "ragged window-pane leaf feeding, moist frass in whorl",
+       control: "Emamectin benzoate / Spinetoram into whorl", cost_bdt_per_acre: 1200}
+    - {pest: "Maize stem borer", day_from: 30, day_to: 60,
+       sign: "shot-holes in whorl, tunnelled stems",
+       control: "Cartap granules in whorl", cost_bdt_per_acre: 600}
+  stages:
+    - {name: "Sowing",        day_from: 0,   day_to: 3}
+    - {name: "Vegetative",    day_from: 3,   day_to: 55}
+    - {name: "Tasseling-silk", day_from: 55, day_to: 70}
+    - {name: "Grain-fill",    day_from: 70,  day_to: 100}
+    - {name: "Maturity",      day_from: 100, day_to: 115}
+  sources:
+    - "https://www.bamis.gov.bd/en/croppnp/1/all/8/"
+
+potato:
+  label: "Potato (Rabi)"
+  seasons: [rabi]
+  sowing_window: {start: "11-01", end: "12-15"}
+  duration_days: 95
+  soil_suitability: {loam: 1.0, sandy_loam: 1.0, clay_loam: 0.7, sandy: 0.6, clay: 0.3}  # hates waterlogged clay
+  water_requirement_mm: 500
+  temp_range_c: {min: 10, max: 28}     # cool-season tuber crop
+  yield_per_acre_kg: 8000
+  price_per_kg_bdt: 15
+  seed_kg_per_acre: 600                 # seed tuber, ~1.5 t/ha
+  seed_price_per_kg_bdt: 35
+  labour_bdt_per_acre: 12000
+  irrigation_bdt_per_acre: 3000
+  fertilizer_schedule:      # PMC baseline potato kg/ha / 2.471 -> kg/acre
+    - {day: 0,  input: tsp,                kg_per_acre: 61, note: "basal at final soil prep"}
+    - {day: 0,  input: gypsum,             kg_per_acre: 49, note: "basal at final soil prep"}
+    - {day: 0,  input: zinc_sulphate,      kg_per_acre: 4,  note: "basal at final soil prep"}
+    - {day: 0,  input: boric_acid,         kg_per_acre: 4,  note: "basal at final soil prep"}
+    - {day: 0,  input: magnesium_sulphate, kg_per_acre: 40, note: "basal at final soil prep"}
+    - {day: 0,  input: urea,               kg_per_acre: 51, note: "half urea basal"}
+    - {day: 0,  input: mp,                 kg_per_acre: 51, note: "half MoP basal"}
+    - {day: 30, input: urea,               kg_per_acre: 50, note: "split at 1st earthing-up"}
+    - {day: 30, input: mp,                 kg_per_acre: 50, note: "split at 1st earthing-up"}
+  irrigation:
+    - {stage: "sprouting",    day_from: 10, day_to: 20, depth_cm: 4}
+    - {stage: "tuber-bulking", day_from: 40, day_to: 70, depth_cm: 5, note: "critical — steady moisture, no waterlogging"}
+  pest_windows:
+    - {pest: "Late blight", day_from: 30, day_to: 70,
+       sign: "water-soaked leaf lesions with white margin in cool foggy weather",
+       control: "Preventive Mancozeb; Cymoxanil+Mancozeb once seen", cost_bdt_per_acre: 2500}
+    - {pest: "Cutworm", day_from: 0, day_to: 20,
+       sign: "seedlings cut at soil line overnight",
+       control: "Poison bait / Chlorpyrifos drench", cost_bdt_per_acre: 500}
+  stages:
+    - {name: "Planting",       day_from: 0,  day_to: 3}
+    - {name: "Sprouting",      day_from: 3,  day_to: 25}
+    - {name: "Vegetative & earthing-up", day_from: 25, day_to: 45}
+    - {name: "Tuber bulking",  day_from: 45, day_to: 80}
+    - {name: "Maturity & harvest", day_from: 80, day_to: 95}
+  sources:
+    - "https://pmc.ncbi.nlm.nih.gov/articles/PMC11272610/"
+
+lentil:
+  label: "Lentil / Masur (Rabi pulse)"
+  seasons: [rabi]
+  sowing_window: {start: "11-10", end: "12-10"}
+  duration_days: 105
+  soil_suitability: {loam: 1.0, clay_loam: 0.9, sandy_loam: 0.9, sandy: 0.6, clay: 0.4}  # dislikes waterlogging
+  water_requirement_mm: 200             # residual-moisture crop, minimal irrigation
+  temp_range_c: {min: 12, max: 30}
+  yield_per_acre_kg: 550                 # improved BARI Masur variety, ~1360 kg/ha
+  price_per_kg_bdt: 95
+  seed_kg_per_acre: 15                   # ~35-40 kg/ha broadcast
+  seed_price_per_kg_bdt: 110
+  labour_bdt_per_acre: 4000
+  irrigation_bdt_per_acre: 800
+  fertilizer_schedule:      # BARI masur, single basal (legume fixes most of its N) kg/ha / 2.471 -> kg/acre
+    - {day: 0, input: urea, kg_per_acre: 20, note: "starter N basal — legume fixes the rest"}
+    - {day: 0, input: tsp,  kg_per_acre: 36, note: "basal at sowing"}
+    - {day: 0, input: mp,   kg_per_acre: 14, note: "basal at sowing"}
+  irrigation:
+    - {stage: "pre-flower", day_from: 30, day_to: 45, depth_cm: 3, note: "one light irrigation only if soil dries out"}
+  pest_windows:
+    - {pest: "Aphid", day_from: 40, day_to: 70,
+       sign: "colonies on tender shoots, honeydew and sooty mould",
+       control: "Imidacloprid at threshold", cost_bdt_per_acre: 400}
+    - {pest: "Stemphylium blight", day_from: 50, day_to: 80,
+       sign: "tan leaf spots spreading fast in warm humid weather",
+       control: "Iprodione+Carbendazim spray", cost_bdt_per_acre: 600}
+  stages:
+    - {name: "Sowing",     day_from: 0,  day_to: 3}
+    - {name: "Vegetative", day_from: 3,  day_to: 40}
+    - {name: "Flowering",  day_from: 40, day_to: 65}
+    - {name: "Podding",    day_from: 65, day_to: 90}
+    - {name: "Maturity",   day_from: 90, day_to: 105}
+  sources:
+    - "https://acsess.onlinelibrary.wiley.com/doi/full/10.1002/plr2.20210"
+
+jute:
+  label: "Jute (Tossa, Kharif-1 fibre crop)"
+  seasons: [kharif_1]
+  sowing_window: {start: "04-01", end: "05-15"}
+  duration_days: 120
+  soil_suitability: {loam: 1.0, clay_loam: 0.9, sandy_loam: 0.8, clay: 0.7, sandy: 0.5}
+  water_requirement_mm: 500             # rainfed early monsoon
+  temp_range_c: {min: 20, max: 38}
+  yield_per_acre_kg: 900                 # dry fibre
+  price_per_kg_bdt: 60
+  seed_kg_per_acre: 4
+  seed_price_per_kg_bdt: 120
+  labour_bdt_per_acre: 8000
+  irrigation_bdt_per_acre: 1000
+  fertilizer_schedule:      # BJRI tossa jute kg/ha / 2.471 -> kg/acre
+    - {day: 0,  input: tsp,    kg_per_acre: 34, note: "basal at final land prep"}
+    - {day: 0,  input: mp,     kg_per_acre: 26, note: "basal at final land prep"}
+    - {day: 0,  input: gypsum, kg_per_acre: 36, note: "basal at final land prep"}
+    - {day: 0,  input: urea,   kg_per_acre: 34, note: "half urea basal"}
+    - {day: 45, input: urea,   kg_per_acre: 35, note: "remaining urea at 42-50 DAS (plant 10-12 cm)"}
+  irrigation:
+    - {stage: "establishment", day_from: 0,  day_to: 25, depth_cm: 3, note: "usually rain-supplied"}
+  pest_windows:
+    - {pest: "Jute hairy caterpillar", day_from: 20, day_to: 50,
+       sign: "gregarious larvae skeletonising leaves",
+       control: "Handpick egg masses; Chlorpyrifos if severe", cost_bdt_per_acre: 700}
+    - {pest: "Jute stem weevil", day_from: 40, day_to: 80,
+       sign: "swellings/galls on stem, tunnelled bark lowering fibre grade",
+       control: "Early thinning; Carbofuran granules", cost_bdt_per_acre: 500}
+  stages:
+    - {name: "Sowing",       day_from: 0,  day_to: 3}
+    - {name: "Establishment & thinning", day_from: 3, day_to: 25}
+    - {name: "Vegetative",   day_from: 25, day_to: 90}
+    - {name: "Maturity",     day_from: 90, day_to: 110}
+    - {name: "Harvest & retting", day_from: 110, day_to: 120}
+  sources:
+    - "http://www.bjri.gov.bd/"
+
+mustard:
+  label: "Mustard / Sarisha (Rabi oilseed)"
+  seasons: [rabi]
+  sowing_window: {start: "10-15", end: "11-15"}
+  duration_days: 85                      # short-duration; fits between Aman and Boro
+  soil_suitability: {loam: 1.0, clay_loam: 0.9, sandy_loam: 0.8, sandy: 0.6, clay: 0.5}
+  water_requirement_mm: 250
+  temp_range_c: {min: 10, max: 30}
+  yield_per_acre_kg: 500
+  price_per_kg_bdt: 75
+  seed_kg_per_acre: 3
+  seed_price_per_kg_bdt: 130
+  labour_bdt_per_acre: 4500
+  irrigation_bdt_per_acre: 1200
+  fertilizer_schedule:      # BARI mustard kg/ha / 2.471 -> kg/acre (heavy N & S feeder)
+    - {day: 0,  input: tsp,    kg_per_acre: 73, note: "basal at final land prep"}
+    - {day: 0,  input: mp,     kg_per_acre: 36, note: "basal at final land prep"}
+    - {day: 0,  input: gypsum, kg_per_acre: 69, note: "basal — mustard is very responsive to sulphur"}
+    - {day: 0,  input: urea,   kg_per_acre: 74, note: "~2/3 urea basal"}
+    - {day: 25, input: urea,   kg_per_acre: 37, note: "top dressing before flowering, at 1st irrigation"}
+  irrigation:
+    - {stage: "vegetative", day_from: 20, day_to: 30, depth_cm: 4}
+    - {stage: "flowering-pod", day_from: 45, day_to: 60, depth_cm: 4}
+  pest_windows:
+    - {pest: "Mustard aphid", day_from: 35, day_to: 65,
+       sign: "dense colonies on flowering shoots and pods — the major mustard pest",
+       control: "Imidacloprid / Malathion at first colonies", cost_bdt_per_acre: 800}
+    - {pest: "Alternaria blight", day_from: 45, day_to: 75,
+       sign: "concentric dark leaf/pod spots in dewy weather",
+       control: "Iprodione or Mancozeb spray", cost_bdt_per_acre: 600}
+  stages:
+    - {name: "Sowing",       day_from: 0,  day_to: 3}
+    - {name: "Vegetative",   day_from: 3,  day_to: 30}
+    - {name: "Flowering",    day_from: 30, day_to: 55}
+    - {name: "Pod-fill",     day_from: 55, day_to: 75}
+    - {name: "Maturity",     day_from: 75, day_to: 85}
+  sources:
+    - "https://www.bamis.gov.bd/en/croppnp/1/all/all/"
+    - "http://www.bari.gov.bd/"

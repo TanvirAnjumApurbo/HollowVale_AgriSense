@@ -38,3 +38,12 @@ Weeding should be completed within one month of germination.
 
 ## Water Need
 Medium — needs four scheduled irrigations across the season but does not require standing water like rice.
+
+## Pest Risk
+Fall armyworm is now the major maize pest, feeding in the leaf whorl (ragged window-pane holes, moist frass) from the seedling stage; scout weekly and treat the whorl with Emamectin benzoate or Spinetoram. Maize stem borer also tunnels the stem during the vegetative stage.
+
+## Harvest & Post-Harvest
+Maize matures about 110-120 days after sowing (a Rabi crop runs longer than a Kharif one); harvest when husks dry and kernels are hard with a black layer at the kernel tip, usually February-March for a Rabi crop. Dry cobs to about 14% moisture before shelling and storage.
+
+## Soil Suitability
+Best on fertile, well-drained loam and clay-loam soils. Tolerates sandy loam with adequate irrigation and fertiliser. Avoid waterlogging — maize is sensitive to standing water, especially when young.

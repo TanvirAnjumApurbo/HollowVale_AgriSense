@@ -19,3 +19,15 @@ Average sowing window: 1 April to 3 May (Kharif-1 season).
 
 ## Water Need
 Medium — jute is typically rainfed during the early monsoon (Kharif) season and does not require standing water like Boro rice, but benefits from consistent moisture during establishment.
+
+## Irrigation
+Jute is grown in the early monsoon and is largely rainfed; it seldom needs irrigation once established. During a dry spell in the first 3-4 weeks after sowing, one or two light irrigations aid establishment. Waterlogging in the seedling stage is harmful, but the crop tolerates monsoon moisture well later.
+
+## Pest Risk
+The jute hairy caterpillar feeds gregariously and can skeletonise leaves early — handpick the egg masses and treat with Chlorpyrifos if severe. The jute stem weevil causes stem galls that lower fibre grade; early thinning and Carbofuran granules help.
+
+## Harvest & Post-Harvest
+Jute is harvested about 110-120 days after sowing, at the early pod stage for the best fibre strength (usually July-August). Cut plants are retted (soaked) in clean, slow-moving water for 2-3 weeks, then the fibre is stripped, washed and sun-dried.
+
+## Soil Suitability
+Best on loam and clay-loam soils with good moisture retention; tolerates a range of textures including medium clay. Very sandy soils dry out too fast for good fibre length.

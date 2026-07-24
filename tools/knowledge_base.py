@@ -24,6 +24,7 @@ CROP_ALIASES = {
     "potato": ["potato"],
     "lentil": ["lentil", "masur"],
     "jute": ["jute"],
+    "mustard": ["mustard", "sarisha", "rapeseed", "canola"],
 }
 
 
@@ -111,6 +112,7 @@ def search_knowledge_base(query, n_results=4, crop_filter=None):
         "results": [
             {
                 "text": doc,
+                "source_file": meta.get("source_file"),
                 "source_title": meta.get("title"),
                 "source_url": meta.get("source_url"),
                 "relevance_distance": dist,

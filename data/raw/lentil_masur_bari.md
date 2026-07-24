@@ -23,3 +23,15 @@ https://acsess.onlinelibrary.wiley.com/doi/abs/10.1002/plr2.20212
 
 ## Water Need
 Low — lentil is grown as a residual-moisture Rabi crop after rice, typically with minimal or no irrigation, making it a strong option where water availability is limited.
+
+## Irrigation
+Lentil is grown chiefly on residual soil moisture after the rice harvest and usually needs no irrigation. If the topsoil dries out badly before flowering, one light irrigation around day 30-45 helps; avoid over-watering, which encourages disease and lodging.
+
+## Pest & Disease Risk
+Aphids colonise the tender shoots, and Stemphylium blight (tan leaf spots that spread fast in warm, humid weather) is the main disease; scout from flowering and spray only at the action threshold. As a legume, lentil fixes much of its own nitrogen, so it needs only a small starter urea dose at sowing.
+
+## Harvest & Post-Harvest
+Lentil matures about 100-110 days after sowing; harvest when the lower pods turn brown and rattle, usually February-March, before the pods shatter. Dry and thresh gently to avoid seed splitting.
+
+## Soil Suitability
+Best on well-drained loam, sandy-loam and clay-loam soils. Heavy waterlogged clay is a poor fit — lentil is very sensitive to standing water and root rot, so a low-lying clay field is risky.
