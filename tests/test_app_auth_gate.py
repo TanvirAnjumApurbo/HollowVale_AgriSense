@@ -16,7 +16,10 @@ APP = os.path.join(os.path.dirname(os.path.dirname(__file__)), "app.py")
 
 @pytest.fixture(autouse=True)
 def no_database(monkeypatch):
-    monkeypatch.delenv("DATABASE_URL", raising=False)
+    # Empty string (not delenv): app.py's load_dotenv() would re-inject a
+    # developer's real DATABASE_URL from .env, but it never overrides an
+    # existing env var, and blank counts as unconfigured.
+    monkeypatch.setenv("DATABASE_URL", "")
     from memory import db
 
     db.close_pool()

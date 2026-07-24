@@ -29,6 +29,7 @@ from memory.session_store import (
     get_farmer_profile,
     get_session_facts,
     get_trace_log,
+    get_turn_traces,
     reset_session,
 )
 
@@ -160,11 +161,14 @@ def _load_conversation(conversation_id):
     if conv is None:
         return False
     rows = convs.load_messages(current_user["id"], conversation_id) or []
-    history, flat_trace = [], []
+    history, flat_trace, turn_traces = [], [], []
     for row in rows:
         history.append({"role": row["role"], "content": row["content"]})
+        if row["role"] == "assistant":
+            turn_traces.append(row.get("trace") or [])
         if row.get("trace"):
             flat_trace.extend(row["trace"])
+    st.session_state["turn_traces"] = turn_traces
     st.session_state["conversation_history"] = history
     st.session_state["farmer_profile"] = conv["farmer_profile"] or {}
     # Partial/legacy fact records are tolerated: session_store and the
@@ -233,12 +237,8 @@ with st.sidebar:
         st.caption("Guest mode: chats are not saved.")
     st.divider()
 
-    st.header("🔍 Agent trace")
-    st.caption("Every tool call this agent has made, with real parameters and raw returned values.")
-    st.caption("Weather data: [Open-Meteo](https://open-meteo.com/)")
-
     profile = get_farmer_profile()
-    st.subheader("Farmer profile (known so far)")
+    st.subheader("🧑‍🌾 Farmer profile")
     if profile:
         for k, v in profile.items():
             st.write(f"**{k}**: {v}")
@@ -247,15 +247,7 @@ with st.sidebar:
     still_missing = missing_fields(profile)
     if still_missing:
         st.caption("Still missing: " + ", ".join(still_missing))
-
-    st.divider()
-    st.subheader(f"Tool calls ({len(get_trace_log())})")
-    for i, entry in enumerate(reversed(get_trace_log())):
-        with st.expander(f"{len(get_trace_log()) - i}. {entry['tool']}", expanded=False):
-            st.markdown("**Arguments:**")
-            st.json(entry["arguments"])
-            st.markdown("**Raw result:**")
-            st.json(entry["result"])
+    st.caption("Weather data: [Open-Meteo](https://open-meteo.com/)")
 
     st.divider()
     with st.expander("💳 Pay via bdapps (CaaS sandbox)", expanded=False):
@@ -304,16 +296,83 @@ with st.sidebar:
                 else:
                     st.error(f"{data.get('status')}: {data.get('status_detail')}")
 
-    st.divider()
-    if st.button("Reset conversation"):
-        reset_session()
-        st.rerun()
-
 st.title("🌾 AgriSense AI")
 st.caption("From a vague opening message to a grounded, explained, costed season plan.")
 
+
+# --- Inline agent activity ----------------------------------------------
+# The visible agent trace lives inside the conversation: while a turn runs,
+# each tool call is streamed into an st.status block in the assistant's
+# message; afterwards (and for reopened conversations) the same real
+# entries render in a collapsed expander above the answer. Everything shown
+# comes from actual tool execution -- never model-invented steps.
+
+def _compact_args(arguments):
+    text = ", ".join(f"{k}={v!r}" for k, v in (arguments or {}).items())
+    return text if len(text) <= 120 else text[:117] + "…"
+
+
+class _LiveTrace(list):
+    """Trace sink passed to run_turn: every append renders the tool call
+    live into the running status container as it happens."""
+
+    def __init__(self, container):
+        super().__init__()
+        self._container = container
+
+    def append(self, entry):
+        super().append(entry)
+        try:
+            self._render(entry)
+        except Exception:
+            pass  # display problems must never break the agent turn
+
+    def _render(self, entry):
+        tool = entry.get("tool", "?")
+        result = entry.get("result") or {}
+        self._container.markdown(
+            f"🔧 `{tool}`({_compact_args(entry.get('arguments'))})"
+        )
+        error = result.get("error") or result.get("exception")
+        if error:
+            self._container.markdown(f"❌ {db.redact(error)}")
+        else:
+            reasons = [
+                r for r in (result.get("reasons") or []) if isinstance(r, str)
+            ]
+            if reasons:
+                self._container.caption(reasons[0])
+
+
+def _render_turn_trace(trace):
+    """Collapsed, inspectable record of a finished turn's real tool calls."""
+    calls = len(trace)
+    failed = any(
+        (entry.get("result") or {}).get("error")
+        or (entry.get("result") or {}).get("exception")
+        or entry.get("tool") == "ERROR"
+        for entry in trace
+    )
+    label = f"🛠️ Agent activity · {calls} tool call{'s' if calls != 1 else ''}"
+    if failed:
+        label += " · ⚠️ errors"
+    with st.expander(label, expanded=False):
+        for i, entry in enumerate(trace, 1):
+            st.markdown(f"**{i}. `{entry.get('tool', '?')}`**")
+            st.caption("Arguments")
+            st.json(entry.get("arguments") or {})
+            st.caption("Result")
+            st.json(entry.get("result") or {}, expanded=False)
+
+
+_turn_traces = get_turn_traces()
+_assistant_idx = 0
 for msg in get_conversation_history():
     with st.chat_message(msg["role"]):
+        if msg["role"] == "assistant":
+            if _assistant_idx < len(_turn_traces) and _turn_traces[_assistant_idx]:
+                _render_turn_trace(_turn_traces[_assistant_idx])
+            _assistant_idx += 1
         st.markdown(msg["content"])
 
 if not get_conversation_history():
@@ -332,30 +391,51 @@ if user_input:
     # user's message AND the error here -- otherwise the rerun below redraws
     # history from scratch and the failed turn (message + error) silently
     # disappears, making the app look like it ignored the user.
-    # Marks where this turn's tool calls start in the flat trace, so the
-    # slice belonging to this assistant turn can be persisted with it.
-    trace_start = len(get_trace_log())
-    with st.spinner("Thinking..."):
+    # Echo the user's message immediately, then run the agent inside a live
+    # status block in the assistant's message: tool calls appear as they
+    # execute (see _LiveTrace), and the block collapses when the turn ends.
+    with st.chat_message("user"):
+        st.markdown(user_input)
+    with st.chat_message("assistant"):
+        status = st.status("🤖 Agent working…", expanded=True)
+        turn_trace = _LiveTrace(status)
+        turn_failed = False
         try:
             run_turn(
                 get_conversation_history(),
                 user_input,
                 get_farmer_profile(),
-                get_trace_log(),
+                turn_trace,
                 get_session_facts(),
             )
         except Exception as e:
+            turn_failed = True
+            safe_error = db.redact(str(e))
             hist = get_conversation_history()
             hist.append({"role": "user", "content": user_input})
             hist.append({
                 "role": "assistant",
-                "content": f"Something went wrong on my end: `{e}`. Please try again or rephrase.",
+                "content": f"Something went wrong on my end: `{safe_error}`. Please try again or rephrase.",
             })
-            get_trace_log().append({
+            turn_trace.append({
                 "tool": "ERROR",
                 "arguments": {"user_input": user_input},
-                "result": {"exception": repr(e)},
+                "result": {"exception": safe_error},
             })
+        calls = len(turn_trace)
+        status.update(
+            label=(
+                f"🛠️ Agent activity · {calls} tool call{'s' if calls != 1 else ''}"
+                + (" · ⚠️ errors" if turn_failed else "")
+            ),
+            state="error" if turn_failed else "complete",
+            expanded=False,
+        )
+
+    # Record this turn's trace: flat log (backward compatibility) plus the
+    # per-turn slice aligned with the assistant message just appended.
+    get_trace_log().extend(turn_trace)
+    get_turn_traces().append(list(turn_trace))
 
     # Persist the completed turn. This branch runs exactly once per
     # submission (chat_input only returns a value on the submitting rerun,
@@ -379,7 +459,7 @@ if user_input:
             conv_id,
             user_input,
             assistant_reply,
-            get_trace_log()[trace_start:],
+            list(turn_trace),
         )
         if saved:
             convs.save_state(

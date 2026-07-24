@@ -110,7 +110,10 @@ def fake_run_turn(history, user_message, profile, trace_log, session_facts=None)
 
 @pytest.fixture
 def fake_store(monkeypatch):
-    monkeypatch.delenv("DATABASE_URL", raising=False)
+    # Empty string (not delenv): app.py's load_dotenv() would re-inject a
+    # developer's real DATABASE_URL from .env, but it never overrides an
+    # existing env var, and blank counts as unconfigured.
+    monkeypatch.setenv("DATABASE_URL", "")
     db.close_pool()
     store = FakeConvStore()
     for name in (
@@ -161,12 +164,19 @@ def test_boot_restores_most_recent_conversation(fake_store):
     # Fresh browser session (new AppTest): transcript + memory must return.
     at2 = _boot(ALICE)
     assert not at2.exception
-    texts = [m.markdown[0].value for m in at2.chat_message if m.markdown]
+    texts = [
+        " ".join(md.value for md in m.markdown)
+        for m in at2.chat_message
+        if m.markdown
+    ]
     assert any("plan my boro season" in t for t in texts)
     assert any("echo: plan my boro season" in t for t in texts)
     assert at2.session_state["farmer_profile"].get("location") == "Rangpur"
     assert at2.session_state["session_facts"].get("weather")
     assert at2.session_state["trace_log"], "trace must be restored"
+    turn_traces = at2.session_state["turn_traces"]
+    assert len(turn_traces) == 1, "one assistant turn -> one trace slice"
+    assert turn_traces[0][0]["tool"] == "fake_tool"
 
 
 def test_users_cannot_see_each_others_chats(fake_store):
@@ -177,7 +187,11 @@ def test_users_cannot_see_each_others_chats(fake_store):
     assert not at_bob.exception
     conv_buttons = [b for b in at_bob.button if (b.key or "").startswith("conv_")]
     assert conv_buttons == [], "bob must not see alice's conversations"
-    texts = [m.markdown[0].value for m in at_bob.chat_message if m.markdown]
+    texts = [
+        " ".join(md.value for md in m.markdown)
+        for m in at_bob.chat_message
+        if m.markdown
+    ]
     assert not any("alice's secret" in t for t in texts)
     # And the fake store confirms scoping directly.
     assert fake_store.list_conversations(BOB["id"]) == []
@@ -214,7 +228,11 @@ def test_switching_back_to_old_conversation_restores_it(fake_store):
     assert old_btn and not old_btn[0].disabled
     at = old_btn[0].click().run()
     assert not at.exception
-    texts = [m.markdown[0].value for m in at.chat_message if m.markdown]
+    texts = [
+        " ".join(md.value for md in m.markdown)
+        for m in at.chat_message
+        if m.markdown
+    ]
     assert any("first conversation" in t for t in texts)
     assert not any("second conversation" in t for t in texts)
     assert at.session_state["active_conversation_id"] == first_id

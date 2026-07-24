@@ -47,6 +47,8 @@ def init_session():
         state["farmer_profile"] = {}
     if "trace_log" not in state:
         state["trace_log"] = []
+    if "turn_traces" not in state:
+        state["turn_traces"] = []
     _ensure_session_facts(state)
 
 
@@ -63,6 +65,14 @@ def get_farmer_profile():
 def get_trace_log():
     init_session()
     return st.session_state["trace_log"]
+
+
+def get_turn_traces():
+    """Per-assistant-turn trace slices: the i-th entry belongs to the i-th
+    assistant message in conversation_history. The flat trace_log is kept in
+    parallel for backward compatibility."""
+    init_session()
+    return st.session_state["turn_traces"]
 
 
 def get_session_facts():
@@ -127,4 +137,5 @@ def reset_session():
     state["conversation_history"] = []
     state["farmer_profile"] = {}
     state["trace_log"] = []
+    state["turn_traces"] = []
     state[_SESSION_FACTS_STATE_KEY] = _empty_session_facts()
