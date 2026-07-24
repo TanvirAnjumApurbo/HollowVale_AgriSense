@@ -54,6 +54,10 @@ st.markdown(
         padding: 0.9rem 1.1rem;
         border-radius: 0.9rem;
     }
+    /* Chat input: brand-green outline so it doesn't blend into the page */
+    [data-testid="stChatInput"] > div {
+        border: 1px solid #2E7D32 !important;
+    }
     /* Sidebar chat list: left-aligned single-line entries with ellipsis */
     .st-key-chat_list button {
         justify-content: flex-start !important;
