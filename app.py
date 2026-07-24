@@ -22,6 +22,7 @@ BDAPPS_SIDECAR_URL = os.environ.get("BDAPPS_SIDECAR_URL", "http://localhost:8000
 
 from agent.orchestrator import run_turn
 from agent.prompts import missing_fields
+from memory import db
 from memory.session_store import (
     init_session,
     get_conversation_history,
@@ -33,6 +34,13 @@ from memory.session_store import (
 
 st.set_page_config(page_title="AgriSense AI", page_icon="🌾", layout="wide")
 init_session()
+
+# Best-effort Neon persistence bootstrap. ensure_schema() is idempotent,
+# latches after the first success, and backs off after failures, so this
+# per-rerun call is effectively free. A missing/unreachable database leaves
+# the app fully functional in session-only mode (errors are redacted and go
+# to stderr inside memory.db -- never the UI).
+db.ensure_schema()
 
 with st.sidebar:
     st.header("🔍 Agent trace")
