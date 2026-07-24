@@ -6,6 +6,8 @@ raw returned values) so a judge can confirm each number in a plan came
 from a real tool call, not the model's imagination.
 """
 
+from pathlib import Path
+
 import requests
 import streamlit as st
 from dotenv import load_dotenv
@@ -38,7 +40,8 @@ BDAPPS_SIDECAR_URL = (
     or "http://localhost:8000"
 ).rstrip("/")
 
-st.set_page_config(page_title="AgriSense AI", page_icon="🌾", layout="wide")
+APP_ICON = Path(__file__).with_name("assets") / "agrisense-icon.png"
+st.set_page_config(page_title="AgriSense AI", page_icon=APP_ICON, layout="wide")
 init_session()
 
 # Layout polish the theme config (.streamlit/config.toml) cannot express.
@@ -51,7 +54,8 @@ st.markdown(
     /* Centered, readable conversation column (ChatGPT-style width) */
     [data-testid="stMainBlockContainer"] {
         max-width: 52rem;
-        padding-top: 2.2rem;
+        /* Clear Streamlit's fixed 60px top bar so tall header art is not clipped. */
+        padding-top: 4rem;
         margin: 0 auto;
     }
     /* Chat bubbles: light card feel */
@@ -87,16 +91,60 @@ st.markdown(
         max-width: 26rem;
         margin: 0 auto;
     }
-    .st-key-login_card h1 {
-        text-align: center;
-    }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-# Chat avatars (branding): the agent is the crop, the farmer is the person.
-AVATARS = {"assistant": "🌾", "user": "🧑‍🌾"}
+
+def _render_brand_header(*, key, compact=False):
+    """Render the AgriSense mark and name as one responsive header."""
+    with st.container(key=key):
+        logo_col, title_col = st.columns(
+            [1, 4 if compact else 5],
+            gap="small",
+            vertical_alignment="center",
+        )
+        logo_col.image(str(APP_ICON), width=60 if compact else 72)
+        if compact:
+            title_col.markdown("## AgriSense AI")
+        else:
+            title_col.title("AgriSense AI")
+
+
+# Chat avatars (branding): the agent uses the app mark, the farmer a person.
+AVATARS = {"assistant": str(APP_ICON), "user": "🧑‍🌾"}
+
+PROFILE_FIELD_LABELS = {
+    "location": "Location",
+    "soil_type": "Soil type",
+    "budget_bdt": "Budget",
+    "target_season": "Target season",
+    "farm_size_acres": "Farm size",
+    "water_availability": "Water availability",
+}
+
+
+def _profile_field_label(field):
+    """Turn stored profile keys into clear labels for farmers."""
+    return PROFILE_FIELD_LABELS.get(field, field.replace("_", " ").capitalize())
+
+
+def _profile_field_value(field, value):
+    """Add familiar units to numeric profile values without changing storage."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return str(value).replace("_", " ")
+
+    if field == "budget_bdt":
+        return f"{number:,.0f} BDT"
+    if field == "farm_size_acres":
+        amount = f"{number:g}"
+        unit = "acre" if number == 1 else "acres"
+        return f"{amount} {unit}"
+    return str(value)
+
 
 # Best-effort Neon persistence bootstrap. ensure_schema() is idempotent,
 # latches after the first success, and backs off after failures, so this
@@ -163,7 +211,7 @@ def _login_screen():
 
 
 def _login_card_body():
-    st.title("🌾 AgriSense AI")
+    _render_brand_header(key="login_brand")
     st.caption("Sign in to build grounded, costed season plans for your farm.")
 
     if not db.is_configured():
@@ -274,7 +322,7 @@ if _is_persistent and "active_conversation_id" not in st.session_state:
         _start_new_chat()
 
 with st.sidebar:
-    st.markdown("## 🌾 AgriSense AI")
+    _render_brand_header(key="sidebar_brand", compact=True)
     st.caption("Agentic season planning for Bangladeshi farmers")
 
     if st.button(
@@ -314,34 +362,35 @@ with st.sidebar:
     with st.expander("🧑‍🌾 Farmer profile", expanded=False):
         if profile:
             for k, v in profile.items():
-                st.write(f"**{k}**: {v}")
+                label = _profile_field_label(k)
+                value = _profile_field_value(k, v)
+                st.write(f"**{label}:** {value}")
         else:
-            st.write("_(nothing known yet)_")
+            st.write("No farm details added yet.")
         still_missing = missing_fields(profile)
         if still_missing:
-            st.caption("Still missing: " + ", ".join(still_missing))
-        st.caption("Weather data: [Open-Meteo](https://open-meteo.com/)")
+            missing_labels = [_profile_field_label(field) for field in still_missing]
+            st.caption("Still needed: " + ", ".join(missing_labels))
 
-    with st.expander("💳 Pay via bdapps (CaaS sandbox)", expanded=False):
+    with st.expander("💳 Pay with bdapps", expanded=False):
         st.caption(
-            "Charging-as-a-Service demo. Sends a charge to the bdapps sidecar "
-            "(`server.py`); in simulate mode no real money or credentials are used."
+            "Pay for your AgriSense season advisory using your mobile balance. "
+            "This demo does not charge real money."
         )
         proj = get_session_facts().get("projection") or {}
         fert = (proj.get("cost_breakdown_bdt") or {}).get("fertilizer")
         if fert:
-            st.caption(f"Tip: this plan's fertilizer input cost is {fert:.0f} BDT.")
+            st.caption(f"Tip: this plan's fertilizer input cost is {fert:,.0f} BDT.")
         pay_msisdn = st.text_input("Mobile number", value="01700000000", key="bdapps_msisdn")
         pay_amount = st.number_input(
             "Amount (BDT)", min_value=1.0, value=20.0, step=1.0, key="bdapps_amount"
         )
         pay_desc = st.text_input("For", value="AgriSense season advisory", key="bdapps_desc")
-        if st.button("Charge via bdapps", key="bdapps_charge"):
+        if st.button("Pay with bdapps", key="bdapps_charge"):
             try:
                 # Generous timeout: the Render free tier spins down when idle
                 # and a cold start can take ~50s before the first response.
-                with st.spinner("Contacting bdapps sidecar (may take up to a "
-                                "minute if it is waking from sleep)..."):
+                with st.spinner("Processing payment…"):
                     resp = requests.post(
                         f"{BDAPPS_SIDECAR_URL}/bdapps/checkout",
                         json={
@@ -352,27 +401,29 @@ with st.sidebar:
                         timeout=90,
                     )
                 data = resp.json()
-            except Exception as exc:
+            except Exception:
                 st.error(
-                    f"Could not reach the bdapps sidecar at {BDAPPS_SIDECAR_URL}. "
-                    "If it is the Render free instance it may still be waking "
-                    "up — try again in a minute. For local dev, run "
-                    f"`uvicorn server:app --port 8000`. ({exc})"
+                    "The payment service is temporarily unavailable. "
+                    "Please try again in a minute."
                 )
             else:
                 if data.get("status") == "CHARGED":
                     st.success(
-                        f"Charged {data['amount']} {data['currency']} "
-                        f"({data['status_code']})"
+                        f"Payment successful: {data['amount']} {data['currency']}."
                     )
                     if data.get("balance_after") is not None:
                         st.caption(f"Balance after: {data['balance_after']} {data['currency']}")
                     receipt = data.get("receipt_url", "")
                     if receipt.startswith("/"):
                         receipt = f"{BDAPPS_SIDECAR_URL}{receipt}"
-                    st.markdown(f"[View receipt]({receipt}) · ref `{data['reference']}`")
+                    st.markdown(
+                        f"[View receipt]({receipt}) · Reference `{data['reference']}`"
+                    )
                 else:
-                    st.error(f"{data.get('status')}: {data.get('status_detail')}")
+                    st.error(
+                        "Payment could not be completed. "
+                        "Please check your details and try again."
+                    )
 
     with st.container(key="user_section"):
         st.divider()
@@ -387,7 +438,7 @@ with st.sidebar:
                 "agent requests left (rolling 24 h)"
             )
 
-st.title("🌾 AgriSense AI")
+_render_brand_header(key="main_brand")
 st.caption("From a vague opening message to a grounded, explained, costed season plan.")
 
 
