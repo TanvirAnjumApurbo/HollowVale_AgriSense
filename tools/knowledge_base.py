@@ -1,20 +1,20 @@
 """RAG retrieval tool over the local Chroma knowledge base.
 
-Embeddings are computed locally with sentence-transformers -- same model
-used at ingest time -- so retrieval works fully offline once the index
-has been built via data/ingest.py.
+Embeddings are computed with Chroma's bundled ONNX all-MiniLM-L6-v2
+runtime -- the same model used at ingest time, so retrieval works fully
+offline once the index is built, with no PyTorch dependency. If the index
+is missing (e.g. on a fresh clone), it is rebuilt from data/raw on first use.
 """
 
 import os
 
 import chromadb
-from sentence_transformers import SentenceTransformer
+from chromadb.utils import embedding_functions
 
 DB_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "chroma_db")
 COLLECTION_NAME = "agrisense_kb"
-EMBED_MODEL_NAME = "all-MiniLM-L6-v2"
 
-_model = None
+_ef_instance = None
 _collection = None
 
 CROP_ALIASES = {
@@ -38,18 +38,25 @@ def _detect_crop(text):
     return None
 
 
-def _get_model():
-    global _model
-    if _model is None:
-        _model = SentenceTransformer(EMBED_MODEL_NAME)
-    return _model
+def _ef():
+    """Singleton ONNX MiniLM embedding function (shared by ingest + query)."""
+    global _ef_instance
+    if _ef_instance is None:
+        _ef_instance = embedding_functions.ONNXMiniLM_L6_V2()
+    return _ef_instance
 
 
 def _get_collection():
     global _collection
     if _collection is None:
         client = chromadb.PersistentClient(path=DB_DIR)
-        _collection = client.get_collection(COLLECTION_NAME)
+        try:
+            _collection = client.get_collection(COLLECTION_NAME, embedding_function=_ef())
+        except Exception:
+            # Fresh clone / missing index: build it from data/raw, then open.
+            from data.ingest import build_index
+            build_index()
+            _collection = client.get_collection(COLLECTION_NAME, embedding_function=_ef())
     return _collection
 
 
@@ -66,7 +73,6 @@ def search_knowledge_base(query, n_results=4, crop_filter=None):
     has the longest fertilizer section rather than the one being asked
     about.
     """
-    model = _get_model()
     collection = _get_collection()
 
     # Auto-detect the crop from the query if the caller didn't pass one.
@@ -74,11 +80,11 @@ def search_knowledge_base(query, n_results=4, crop_filter=None):
     if effective_crop:
         effective_crop = effective_crop.lower()
 
-    query_embedding = model.encode([query]).tolist()
-
     # Pull a wide pool so crop-matching chunks are available to promote.
+    # Chroma embeds `query` with the collection's own embedding function,
+    # so it must be the same one used at ingest time (ONNX MiniLM).
     pool_size = max(n_results * 4, 12)
-    results = collection.query(query_embeddings=query_embedding, n_results=pool_size)
+    results = collection.query(query_texts=[query], n_results=pool_size)
 
     docs = results.get("documents", [[]])[0]
     metas = results.get("metadatas", [[]])[0]

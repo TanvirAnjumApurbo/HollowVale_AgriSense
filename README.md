@@ -43,7 +43,7 @@ Tier 1/2 features (persistent memory, proactive weather-triggered advice, scenar
   - `weather.py` -- Open-Meteo geocoding + forecast.
   - `knowledge_base.py` -- RAG retrieval over a local Chroma vector store.
   - `financials.py` -- deterministic cost/yield/ROI/break-even calculator (plain Python, not LLM arithmetic).
-- **`data/`** -- `raw/` holds the sourced knowledge base documents; `ingest.py` chunks and embeds them (locally, via `sentence-transformers`, no embedding API call) into `chroma_db/`.
+- **`data/`** -- `raw/` holds the sourced knowledge base documents; `ingest.py` chunks and embeds them (locally, via Chroma's bundled ONNX `all-MiniLM-L6-v2` runtime -- no embedding API call and no PyTorch) into `chroma_db/`. The index is gitignored and rebuilt automatically on first use if missing, so a fresh clone is self-sufficient.
 - **`memory/session_store.py`** -- conversation/profile state for the current session. This is the seam for Tier 1 persistent memory: swap its internals from `st.session_state` to SQLite/Postgres without touching the orchestrator or UI.
 
 ## Setup
@@ -66,7 +66,7 @@ For Streamlit Community Cloud deployment, set `OPENAI_API_KEY` (and optionally `
 - **Open-Meteo** (geocoding + forecast APIs) -- free, no key required.
 - **OpenAI API** (`gpt-4o-mini`) -- requires `OPENAI_API_KEY`.
 - **ChromaDB** -- local, in-process vector store, no external service.
-- **sentence-transformers** (`all-MiniLM-L6-v2`) -- local embeddings, no API call, works offline once downloaded.
+- **ChromaDB ONNX embeddings** (`all-MiniLM-L6-v2`) -- local embeddings via Chroma's bundled ONNX runtime (no PyTorch), no API call, works offline once the model is downloaded.
 
 ## Verification
 

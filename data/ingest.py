@@ -3,21 +3,20 @@
 Run once (or whenever data/raw/ changes) with:
     python data/ingest.py
 
-Uses sentence-transformers (all-MiniLM-L6-v2) for embeddings so the whole
-RAG pipeline is free and works offline -- no external embedding API call
-at ingest time or at query time.
+Uses Chroma's bundled ONNX all-MiniLM-L6-v2 runtime for embeddings so the
+whole RAG pipeline is free and works offline -- no external embedding API
+call and no PyTorch dependency at ingest time or at query time.
 """
 
 import os
 import re
 
 import chromadb
-from sentence_transformers import SentenceTransformer
+from chromadb.utils import embedding_functions
 
 RAW_DIR = os.path.join(os.path.dirname(__file__), "raw")
 DB_DIR = os.path.join(os.path.dirname(__file__), "chroma_db")
 COLLECTION_NAME = "agrisense_kb"
-EMBED_MODEL_NAME = "all-MiniLM-L6-v2"
 
 CHUNK_SIZE_CHARS = 900
 CHUNK_OVERLAP_CHARS = 150
@@ -93,14 +92,20 @@ def build_index():
     if not docs:
         raise SystemExit(f"No .md files found in {RAW_DIR} -- add knowledge base sources first.")
 
-    model = SentenceTransformer(EMBED_MODEL_NAME)
     client = chromadb.PersistentClient(path=DB_DIR)
 
     try:
         client.delete_collection(COLLECTION_NAME)
     except Exception:
         pass
-    collection = client.create_collection(COLLECTION_NAME)
+    # Attach the ONNX embedding function to the collection so Chroma embeds
+    # documents at add() time and queries at query() time with the same
+    # model -- query-side retrieval must use this identical EF or vectors
+    # won't match.
+    collection = client.create_collection(
+        COLLECTION_NAME,
+        embedding_function=embedding_functions.ONNXMiniLM_L6_V2(),
+    )
 
     ids, texts, metadatas = [], [], []
     for doc in docs:
@@ -121,10 +126,10 @@ def build_index():
                 "crops": ",".join(chunk_crops) or "general",
             })
 
-    print(f"Embedding {len(texts)} chunks from {len(docs)} documents...")
-    embeddings = model.encode(texts, show_progress_bar=True).tolist()
-
-    collection.add(ids=ids, documents=texts, metadatas=metadatas, embeddings=embeddings)
+    print(f"Embedding {len(texts)} chunks from {len(docs)} documents (ONNX MiniLM)...")
+    # No explicit embeddings= : Chroma embeds the documents with the
+    # collection's ONNX embedding function.
+    collection.add(ids=ids, documents=texts, metadatas=metadatas)
     print(f"Indexed {len(texts)} chunks into '{COLLECTION_NAME}' at {DB_DIR}")
 
 

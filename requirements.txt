@@ -1,6 +1,6 @@
-streamlit>=1.38
-openai>=1.40
-chromadb>=0.5
-sentence-transformers>=3.0
-requests>=2.32
-python-dotenv>=1.0
+streamlit==1.60.0
+openai==2.48.0
+chromadb==1.5.9
+onnxruntime==1.27.0
+requests==2.34.2
+python-dotenv==1.2.2

@@ -73,20 +73,33 @@ if not get_conversation_history():
 user_input = st.chat_input("Tell me about your farm...")
 
 if user_input:
-    with st.chat_message("user"):
-        st.markdown(user_input)
+    # run_turn appends the user + assistant messages to conversation history
+    # on success. On failure it raises *before* appending, so we record the
+    # user's message AND the error here -- otherwise the rerun below redraws
+    # history from scratch and the failed turn (message + error) silently
+    # disappears, making the app look like it ignored the user.
+    with st.spinner("Thinking..."):
+        try:
+            run_turn(
+                get_conversation_history(),
+                user_input,
+                get_farmer_profile(),
+                get_trace_log(),
+            )
+        except Exception as e:
+            hist = get_conversation_history()
+            hist.append({"role": "user", "content": user_input})
+            hist.append({
+                "role": "assistant",
+                "content": f"Something went wrong on my end: `{e}`. Please try again or rephrase.",
+            })
+            get_trace_log().append({
+                "tool": "ERROR",
+                "arguments": {"user_input": user_input},
+                "result": {"exception": repr(e)},
+            })
 
-    with st.chat_message("assistant"):
-        with st.spinner("Thinking..."):
-            try:
-                reply = run_turn(
-                    get_conversation_history(),
-                    user_input,
-                    get_farmer_profile(),
-                    get_trace_log(),
-                )
-            except Exception as e:
-                reply = f"Something went wrong on my end: `{e}`. Please try again or rephrase."
-        st.markdown(reply)
-
+    # The history loop at the top of the script renders every turn (including
+    # anything just appended) on this rerun -- so no manual st.chat_message
+    # blocks here, which would otherwise double-draw each turn.
     st.rerun()

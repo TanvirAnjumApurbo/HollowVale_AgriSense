@@ -5,3 +5,8 @@ __pycache__/
 .streamlit/secrets.toml
 *.sqlite3
 .claude/
+
+# Built RAG index -- rebuilt from data/raw on first use (see data/ingest.py).
+# Never commit it: a partial index (vectors without the doc store) is worse
+# than none, and it must not be tracked half by *.sqlite3 above.
+data/chroma_db/

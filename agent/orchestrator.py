@@ -15,7 +15,7 @@ from tools.weather import get_weather_for_location
 from tools.knowledge_base import search_knowledge_base
 from tools.financials import compute_financial_projection, rank_candidate_crops
 
-MAX_TOOL_ITERATIONS = 8
+MAX_TOOL_ITERATIONS = 12
 
 TOOL_SCHEMAS = [
     {
@@ -136,8 +136,14 @@ def run_turn(conversation_history, user_message, farmer_profile, trace_log):
     messages.extend(conversation_history)
     messages.append({"role": "user", "content": user_message})
 
-    for _ in range(MAX_TOOL_ITERATIONS):
-        assistant_message = chat(messages, tools=TOOL_SCHEMAS)
+    for i in range(MAX_TOOL_ITERATIONS):
+        # On the final pass, withhold the tools so the model is forced to
+        # answer from everything gathered so far instead of requesting yet
+        # another tool call and dead-ending on the iteration cap. A full
+        # plan chains weather -> rank -> 2-3 KB lookups -> projection, so
+        # the cap is reachable on a real request.
+        last = (i == MAX_TOOL_ITERATIONS - 1)
+        assistant_message = chat(messages, tools=None if last else TOOL_SCHEMAS)
 
         if not assistant_message.tool_calls:
             final_text = assistant_message.content or ""
