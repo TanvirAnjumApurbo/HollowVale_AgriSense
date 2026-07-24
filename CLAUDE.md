@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-AgriSense AI is an agentic advisor (IUT ICT Fest hackathon) that takes a Bangladeshi farmer from a vague opening message to a grounded, explained, costed season plan. It is a **single-process Streamlit app** with a **hand-rolled tool-calling loop** (deliberately no LangChain/CrewAI) so every tool call is transparent for the "visible agent trace" requirement.
+AgriSense AI is an agentic advisor (IUT ICT Fest hackathon) that takes a Bangladeshi farmer from a vague opening message to a grounded, explained, costed season plan. The core is a **Streamlit app** with a **hand-rolled tool-calling loop** (deliberately no LangChain/CrewAI) so every tool call is transparent for the "visible agent trace" requirement. A second, independently deployable process — a **FastAPI sidecar** (`server.py`) — hosts the Tier-2 bdapps payment integration, which needs a public inbound HTTP endpoint that Streamlit cannot serve (see the bdapps sidecar section below).
 
 ## Commands
 
@@ -18,6 +18,10 @@ cp .env.example .env                    # then set OPENAI_API_KEY (Copy-Item in 
 # Run the app
 streamlit run app.py
 
+# Run the bdapps CaaS payment sidecar (separate FastAPI process; simulator by default)
+uvicorn server:app --host 0.0.0.0 --port 8000     # BDAPPS_SIMULATE=true default — no creds/network
+pip install -r requirements-sidecar.txt           # lean sidecar-only deps (also what Render builds)
+
 # Build the RAG index (optional — knowledge_base self-heals and builds it on first query)
 python data/ingest.py                   # re-run after editing any data/raw/*.md
 
@@ -27,6 +31,7 @@ pytest tests/ -q                                                   # full suite
 pytest tests/test_crops.py -q                                      # crop schema + cost-consistency only
 pytest tests/test_season_plan.py -q                                # dated calendar + weather shift + cost reconciliation
 pytest tests/test_orchestrator_memory.py -q                        # durable facts + follow-up consistency + no weather refetch
+pytest tests/test_bdapps.py -q                                     # bdapps sidecar: store, simulator, HTTP endpoints (uses FastAPI TestClient)
 pytest "tests/test_crops.py::test_projection_cost_is_schedule_derived[potato]" -q   # a single test/param
 
 # Deterministic self-checks — runnable modules, no pytest needed
@@ -65,7 +70,7 @@ Knowledge is deliberately split so the recommendation is deterministic:
 
 ## Scoring engine specifics (`tools/agronomy.py`)
 
-- `score_crop` returns component scores (soil .25, season .25, water .20, temp .10, profit .20; **budget is a flag, not weighted**), an overall weighted score, and the `reasons` list. `rank_crops` scores all 8 and sorts.
+- `score_crop` returns component scores (soil .25, season .25, water .20, temp .10, profit .20; **budget is a flag, not weighted**), an overall weighted score, and the `reasons` list. `rank_crops` scores every candidate crop and sorts.
 - **Date/season awareness is the demo's differentiator.** `infer_season` (Bangladesh Kharif-1 / Kharif-2 / Rabi calendar) and `window_timing` mean that asked on a Kharif-2 date it ranks Aman rice first (window open) and scores Boro low (Rabi window months away). Don't flatten this into profit-sorting.
 - **Profit is scored against a fixed strong-ROI benchmark (`PROFIT_REF_PCT`), not min-max across candidates** — this is intentional. Min-max lets one low-cost pulse (lentil, ~450% ROI) peg at 1.0 and swamp the soil weight, so soil/season could never change the ranking. If you touch profit scoring, preserve the property that flipping soil or season flips the top crop (the `python -m tools.agronomy` self-check asserts exactly this).
 
@@ -76,11 +81,24 @@ Knowledge is deliberately split so the recommendation is deterministic:
 3. If it's a new crop family, register aliases in `data/ingest.py` and `tools/knowledge_base.py`.
 4. `python data/ingest.py` to rebuild the index, then `pytest tests/ -q`.
 
+## bdapps CaaS payment sidecar (`server.py` + `bdapps/`)
+
+The Tier-2 payment feature is a **separate FastAPI process**, not part of the Streamlit app, because bdapps (Charging-as-a-Service) POSTs asynchronous charge notifications to a registered public **host address** and Streamlit cannot serve inbound routes. Keep it decoupled: the sidecar imports `tools/`, but the Streamlit app never imports the sidecar.
+
+- **Simulator by default.** `BDAPPS_SIMULATE=true` (the default) runs a deterministic local charge — no credentials, no network — that mirrors bdapps's `S1000` response envelope and deducts from a seeded per-MSISDN balance. This *is* the sandbox/simulator mode the rubric scores; the live API path stays off unless explicitly enabled.
+- **One real-call seam.** The actual bdapps HTTP contract lives *only* in `bdapps/client.py::_charge_via_bdapps` (marked `TODO(confirm)` — the portal's TAP API doc renders truncated, so the exact endpoint/fields/ack are unconfirmed). Everything else is provider-agnostic; `charge()` dispatches simulator vs. live.
+- **Separate persistence.** `bdapps/store.py` is a SQLite ledger + simulated balances keyed by transaction *reference* (payments are stateless request/response, unlike the session-keyed chat) — deliberately distinct from `memory/session_store.py`. DB at `data/bdapps.db` (gitignored, created on first run). `bdapps/config.py` reads settings live from env per call so tests point it at a temp DB.
+- **Endpoints (`server.py`):** `POST /bdapps/checkout` (charge), `POST /bdapps/notify` (the registered host address; `POST /` aliases it as a fallback for portals that only take a bare host), `GET /bdapps/receipt/{ref}` (HTML+JSON), `GET /bdapps/quote` (amount derived from `compute_financial_projection` — tools stay the source of truth for money), `/bdapps/balance`, `/bdapps/transactions`, `/healthz`.
+- **Streamlit hook:** `app.py`'s sidebar "Pay via bdapps" panel POSTs to the sidecar at `BDAPPS_SIDECAR_URL` (default `http://localhost:8000`).
+- **Deploy:** `render.yaml` (Blueprint) deploys the sidecar with the lean `requirements-sidecar.txt`, which excludes Streamlit/Chroma/onnxruntime so the cloud build is fast and can't fail on the heavy RAG deps. `BDAPPS_*` secrets are set in the Render dashboard, never committed. Full run-through and the human-only portal steps are in `BDAPPS.md`.
+
 ## Other conventions
 
 - `agent/llm.py::chat()` is the only LLM entry point (OpenAI `gpt-4o-mini` default; swap via `LLM_PROVIDER`/`LLM_MODEL`). Secrets resolve **Streamlit secrets → env var** via `_get_secret`, so the app runs both on Streamlit Cloud and from a local `.env`.
 - `memory/session_store.py` is the state seam for durable persistence. Its current Streamlit-session backend already preserves conversation/profile/trace plus established facts across turns; keep its function signatures stable so swapping to SQLite/Postgres needs no changes in `app.py`/`orchestrator.py`. (Note: repo `memory/` is a Python package, unrelated to any Claude memory.)
 - The Open-Meteo endpoints in `tools/weather.py` are the open-access endpoints: no account/API key is needed for this non-commercial prototype. Commercial capacity/licensing uses the paid customer endpoint and an API key; preserve Open-Meteo attribution.
 - Embeddings are Chroma's bundled ONNX `all-MiniLM-L6-v2` (no PyTorch). The same embedding function must be used at ingest and query time.
-- **Never commit `data/chroma_db/`** — it's gitignored and rebuilds from `data/raw`; a partial index is worse than none.
+- **Never commit `data/chroma_db/`** — it's gitignored and rebuilds from `data/raw`; a partial index is worse than none. Likewise `data/bdapps.db` (the sidecar ledger) is gitignored and rebuilt at runtime.
+- Three requirements files: `requirements.txt` (Streamlit app) · `requirements-sidecar.txt` (lean FastAPI sidecar for Render — no Streamlit/Chroma/onnxruntime) · `requirements-dev.txt` (adds pytest + httpx for the sidecar's FastAPI TestClient).
+- Real secrets live in `.env` (gitignored); `.env.example` is the shareable template and stays all-blank. This applies to `OPENAI_API_KEY` and every `BDAPPS_*` credential.
 - Commits in this repo **omit the `Co-Authored-By` trailer**.
