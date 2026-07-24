@@ -142,6 +142,16 @@ def _event(event_date, event_type, action, quantity, cost_bdt, source, **extra):
     return result
 
 
+def _calendar_error(message, reason=None):
+    """Return the uniform explainable error contract for the public tool."""
+    return {
+        "error": message,
+        "reasons": [
+            reason or f"Season calendar was not built: {message}"
+        ],
+    }
+
+
 def _is_rain_sensitive_nitrogen(line):
     """Classify exposed nitrogen applications without moving basal inputs.
 
@@ -388,28 +398,45 @@ def build_season_calendar(crop_key, sowing_date, area_acres, weather=None) -> di
     available, the event remains unchanged and a warning is returned.
     """
     if not isinstance(crop_key, str):
-        return {
-            "error": (
-                f"Unknown crop '{crop_key}'. Supported crops: "
-                f"{', '.join(list_crop_keys())}"
-            )
-        }
+        message = (
+            f"Unknown crop '{crop_key}'. Supported crops: "
+            f"{', '.join(list_crop_keys())}"
+        )
+        return _calendar_error(
+            message,
+            (
+                "Season calendar was not built because "
+                f"crop_key={crop_key!r} is not a supported crop name."
+            ),
+        )
 
     canonical_key = normalize_key(crop_key)
     crop = get_crop(crop_key)
     if canonical_key is None or crop is None:
-        return {
-            "error": (
-                f"Unknown crop '{crop_key}'. Supported crops: "
-                f"{', '.join(list_crop_keys())}"
-            )
-        }
+        message = (
+            f"Unknown crop '{crop_key}'. Supported crops: "
+            f"{', '.join(list_crop_keys())}"
+        )
+        return _calendar_error(
+            message,
+            (
+                "Season calendar was not built because "
+                f"crop_key={crop_key!r} did not resolve to a crops.yaml key."
+            ),
+        )
 
     try:
         sowing = _parse_date(sowing_date, "sowing_date")
         area = _normalize_area(area_acres)
     except ValueError as exc:
-        return {"error": str(exc)}
+        return _calendar_error(
+            str(exc),
+            (
+                "Season calendar input validation failed for "
+                f"sowing_date={sowing_date!r}, area_acres={area_acres!r}: "
+                f"{exc}"
+            ),
+        )
 
     offsets = [0, int(crop["duration_days"])]
     for stage in crop.get("stages", []):
@@ -424,12 +451,19 @@ def build_season_calendar(crop_key, sowing_date, area_acres, weather=None) -> di
         sowing + timedelta(days=min(offsets))
         sowing + timedelta(days=max(offsets))
     except OverflowError:
-        return {
-            "error": (
-                "sowing_date is too close to the supported calendar boundary "
-                "for this crop's day offsets."
-            )
-        }
+        message = (
+            "sowing_date is too close to the supported calendar boundary "
+            "for this crop's day offsets."
+        )
+        return _calendar_error(
+            message,
+            (
+                f"Season calendar for crop={canonical_key}, "
+                f"sowing_date={sowing.isoformat()} requires offsets from "
+                f"{min(offsets)} to {max(offsets)} days, which exceed the "
+                "supported date range."
+            ),
+        )
 
     projection = compute_financial_projection(canonical_key, area)
     if "error" in projection:
@@ -658,6 +692,66 @@ def build_season_calendar(crop_key, sowing_date, area_acres, weather=None) -> di
             f"projection ({total_event_cost} != {financial_total})."
         )
 
+    reasons = [
+        (
+            f"Calendar basis: crop={canonical_key}, label={crop['label']!r}, "
+            f"area_acres={area}, sowing_date={sowing.isoformat()}, "
+            f"duration_days={int(crop['duration_days'])}, "
+            f"harvest_date={harvest.isoformat()}."
+        ),
+        (
+            f"Calendar costs: cost_breakdown_bdt={costs}, "
+            f"total_event_cost_bdt={total_event_cost}, "
+            f"financial_total_cost_bdt={financial_total}, "
+            f"costs_reconciled={costs_reconciled}."
+        ),
+    ]
+    for index, event in enumerate(events, start=1):
+        window = (
+            f", end_date={event['end_date']}"
+            if event.get("end_date")
+            else ""
+        )
+        ancillary = "".join(
+            f", {key}={event[key]!r}"
+            for key in (
+                "signs",
+                "weather_status",
+                "rain_sensitive",
+                "input",
+                "day_offset",
+            )
+            if key in event
+        )
+        reasons.append(
+            (
+                f"Calendar event {index}: date={event['date']}{window}, "
+                f"type={event['type']}, action={event['action']!r}, "
+                f"quantity={event['quantity']!r}, "
+                f"cost_bdt={event['cost_bdt']}, "
+                f"source={event['source']!r}{ancillary}."
+            )
+        )
+        if event.get("shifted_from"):
+            reasons.append(
+                (
+                    f"Weather adjustment for event {index}: "
+                    f"shifted_from={event['shifted_from']}, "
+                    f"new_date={event['date']}, "
+                    f"forecast_rain_48h_mm="
+                    f"{event.get('forecast_rain_48h_mm')}, "
+                    f"rescheduled_day_rain_mm="
+                    f"{event.get('rescheduled_day_rain_mm')}; "
+                    f"adjustment_reason={event['adjustment_reason']!r}."
+                )
+            )
+    reasons.append(
+        (
+            f"Weather pass: weather_adjustments={weather_adjustments}, "
+            f"weather_assessment={weather_assessment}, warnings={warnings}."
+        )
+    )
+
     return {
         "crop": canonical_key,
         "label": crop["label"],
@@ -682,6 +776,7 @@ def build_season_calendar(crop_key, sowing_date, area_acres, weather=None) -> di
             "in the supplied forecast."
         ),
         "data_source_note": projection["data_source_note"],
+        "reasons": reasons,
     }
 
 

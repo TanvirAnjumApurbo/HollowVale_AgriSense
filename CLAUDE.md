@@ -26,6 +26,7 @@ pip install -r requirements-dev.txt
 pytest tests/ -q                                                   # full suite
 pytest tests/test_crops.py -q                                      # crop schema + cost-consistency only
 pytest tests/test_season_plan.py -q                                # dated calendar + weather shift + cost reconciliation
+pytest tests/test_orchestrator_memory.py -q                        # durable facts + follow-up consistency + no weather refetch
 pytest "tests/test_crops.py::test_projection_cost_is_schedule_derived[potato]" -q   # a single test/param
 
 # Deterministic self-checks — runnable modules, no pytest needed
@@ -40,13 +41,14 @@ Note: the retrieval tests query Chroma, which triggers a one-time ONNX model dow
 
 ## Core principle: the LLM narrates, tools decide
 
-The single most important constraint: **the model never does arithmetic or suitability judgement.** All numbers (weather, cost, yield, ROI, break-even) and all crop rankings come from tools; the LLM's job is to gather intake, chain the tool calls, and explain the results. `tools/agronomy.py` even emits its reasoning as a `reasons` list of strings (each naming the exact input value used) specifically so the model quotes them rather than inventing its own rationale. When adding features, keep computation in tools and preserve this separation.
+The single most important constraint: **the model never does arithmetic or suitability judgement.** All numbers (weather, cost, yield, ROI, break-even) and all crop rankings come from tools; the LLM's job is to gather intake, chain the tool calls, and explain the results. Every agent-facing tool result carries a top-level `reasons` list with exact values/evidence. The system prompt requires recommendations to quote a relevant producing-tool reason verbatim, forbids paraphrased numbers, and forbids a claim when no tool reason supports it. When adding features, keep computation in tools and preserve this separation.
 
 ## The agent loop (`agent/orchestrator.py::run_turn`)
 
-- State is passed **by reference** from `st.session_state`: `conversation_history`, `farmer_profile`, and `trace_log` are mutated in place, which is how the UI reflects updates. `run_turn(conversation_history, user_message, farmer_profile, trace_log)`.
-- Each iteration: `messages = [system(farmer_profile)] + history + [user]`, call `chat()`, execute any tool calls, append results, then **rebuild the system prompt** from the (possibly updated) profile so intake tracking stays current mid-turn.
-- A per-turn `context = {farmer_profile, last_weather}` is threaded into `_execute_tool`. `get_weather` caches its real result into `context`; `rank_crops` and `build_season_calendar` read the cached forecast from `context` — **not** from LLM-supplied args — so scoring and weather adjustments use injected real data, not numbers the model might fudge.
+- State is passed **by reference** from `st.session_state`: `conversation_history`, `farmer_profile`, `trace_log`, and `session_facts` are mutated in place, which is how the UI reflects updates. `run_turn(conversation_history, user_message, farmer_profile, trace_log, session_facts=None)` keeps the fifth parameter optional for old callers/tests.
+- Each iteration: `messages = [system(farmer_profile, session_facts)] + history + [user]`, call `chat()`, execute any tool calls, append results, then **rebuild the system prompt** from the updated profile/facts so intake and established outputs stay current mid-turn.
+- `memory/session_store.py` keeps exactly five established decision facts: `weather`, `ranking`, `chosen_crop`, `projection`, and `calendar`. Successful relevant tool calls overwrite the matching fact; `build_system_prompt` injects their compact digest plus verbatim quotable reason entries on every later turn.
+- A per-turn `context = {farmer_profile, last_weather, session_facts}` is threaded into `_execute_tool`. It starts `last_weather` from the stored weather fact. `rank_crops` and `build_season_calendar` read that injected forecast — **not** LLM-supplied numbers. A repeated same-location `get_weather` call returns a transparent cached result without hitting the network; an explicit farmer refresh uses `refresh=true` and invalidates weather-dependent ranking/calendar facts. Location changes invalidate weather/ranking/calendar; area changes invalidate ranking/projection/calendar; other suitability-input changes invalidate ranking. Projection/calendar writes also clear an incompatible sibling (different crop, acreage, or adjusted-yield scope), while `chosen_crop` changes only from an explicit farmer-profile update.
 - On the final iteration (`MAX_TOOL_ITERATIONS`) tools are withheld (`tools=None`) to force a text answer instead of dead-ending on the cap.
 - On success it appends user+assistant to `conversation_history`. On exception it raises *before* appending; `app.py` catches that and records the failed turn (message + error) into history and trace, so failures are visible rather than silently lost on `st.rerun()`.
 
@@ -77,7 +79,8 @@ Knowledge is deliberately split so the recommendation is deterministic:
 ## Other conventions
 
 - `agent/llm.py::chat()` is the only LLM entry point (OpenAI `gpt-4o-mini` default; swap via `LLM_PROVIDER`/`LLM_MODEL`). Secrets resolve **Streamlit secrets → env var** via `_get_secret`, so the app runs both on Streamlit Cloud and from a local `.env`.
-- `memory/session_store.py` is the state seam for future persistence — keep its function signatures stable so swapping `st.session_state` for SQLite/Postgres needs no changes in `app.py`/`orchestrator.py`. (Note: repo `memory/` is a Python package, unrelated to any Claude memory.)
+- `memory/session_store.py` is the state seam for durable persistence. Its current Streamlit-session backend already preserves conversation/profile/trace plus established facts across turns; keep its function signatures stable so swapping to SQLite/Postgres needs no changes in `app.py`/`orchestrator.py`. (Note: repo `memory/` is a Python package, unrelated to any Claude memory.)
+- The Open-Meteo endpoints in `tools/weather.py` are the open-access endpoints: no account/API key is needed for this non-commercial prototype. Commercial capacity/licensing uses the paid customer endpoint and an API key; preserve Open-Meteo attribution.
 - Embeddings are Chroma's bundled ONNX `all-MiniLM-L6-v2` (no PyTorch). The same embedding function must be used at ingest and query time.
 - **Never commit `data/chroma_db/`** — it's gitignored and rebuilds from `data/raw`; a partial index is worse than none.
 - Commits in this repo **omit the `Co-Authored-By` trailer**.

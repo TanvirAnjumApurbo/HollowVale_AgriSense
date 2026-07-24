@@ -15,6 +15,9 @@ figures remain ESTIMATES for a hackathon demo (general Bangladesh
 agronomic/market ranges, not a live market feed) and are labelled as such.
 """
 
+from math import isfinite
+from numbers import Real
+
 from data.crop_loader import (
     cost_breakdown_per_acre,
     get_crop,
@@ -52,11 +55,34 @@ def compute_financial_projection(crop, area_acres, yield_adjustment_pct=0.0, pri
     30%?") scale expected yield up/down without touching the base table.
     price_override lets scenario questions swap in a different sale price.
     """
-    rec = get_crop(crop)
+    rec = get_crop(crop) if isinstance(crop, str) else None
     if rec is None:
-        return {"error": f"Unknown crop '{crop}'. Supported crops: {', '.join(list_supported_crops())}"}
-    if area_acres is None or area_acres <= 0:
-        return {"error": "area_acres must be a positive number."}
+        message = (
+            f"Unknown crop '{crop}'. Supported crops: "
+            f"{', '.join(list_supported_crops())}"
+        )
+        return {
+            "error": message,
+            "reasons": [
+                f"Financial projection was not computed: {message}"
+            ],
+        }
+    if (
+        isinstance(area_acres, bool)
+        or not isinstance(area_acres, Real)
+        or not isfinite(float(area_acres))
+        or area_acres <= 0
+    ):
+        message = "area_acres must be a positive number."
+        return {
+            "error": message,
+            "reasons": [
+                (
+                    "Financial projection was not computed because "
+                    f"area_acres={area_acres!r}; {message}"
+                )
+            ],
+        }
 
     crop_key = normalize_key(crop)
     per_acre_costs = cost_breakdown_per_acre(rec)
@@ -73,6 +99,37 @@ def compute_financial_projection(crop, area_acres, yield_adjustment_pct=0.0, pri
 
     break_even_yield_units = round(total_cost / price, 2) if price else None
     break_even_price_per_unit = round(total_cost / expected_yield, 2) if expected_yield else None
+
+    reasons = [
+        (
+            f"Cost projection for crop={crop_key}, area_acres={area_acres}: "
+            f"seed={cost_breakdown['seed']} BDT, "
+            f"fertilizer={cost_breakdown['fertilizer']} BDT, "
+            f"labour={cost_breakdown['labour']} BDT, "
+            f"irrigation={cost_breakdown['irrigation']} BDT, "
+            f"pesticide={cost_breakdown['pesticide']} BDT; "
+            f"total_cost_bdt={total_cost}."
+        ),
+        (
+            f"Yield and revenue for crop={crop_key}: "
+            f"expected_yield={expected_yield} kg after "
+            f"yield_adjustment_pct_applied={yield_adjustment_pct}; "
+            f"price_per_unit_bdt={price}; revenue_bdt={revenue}."
+        ),
+        (
+            f"Profitability for crop={crop_key}: "
+            f"net_profit_bdt={net_profit}, roi_pct={roi_pct}, "
+            f"break_even_yield_units={break_even_yield_units} kg, "
+            "break_even_price_per_unit_bdt="
+            f"{break_even_price_per_unit}."
+        ),
+        (
+            f"Planning context for crop={crop_key}: "
+            f"duration_days={rec['duration_days']}, "
+            f"water_need={_water_need_label(rec.get('water_requirement_mm'))}. "
+            f"{DATA_SOURCE_NOTE}"
+        ),
+    ]
 
     return {
         "crop": crop_key,
@@ -92,6 +149,7 @@ def compute_financial_projection(crop, area_acres, yield_adjustment_pct=0.0, pri
         "break_even_price_per_unit_bdt": break_even_price_per_unit,
         "yield_adjustment_pct_applied": yield_adjustment_pct,
         "data_source_note": DATA_SOURCE_NOTE,
+        "reasons": reasons,
     }
 
 

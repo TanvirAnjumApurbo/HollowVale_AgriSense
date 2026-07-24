@@ -17,6 +17,7 @@ Weights (overall = weighted sum; budget is a flag, not weighted):
 """
 
 from datetime import date
+from math import isfinite
 
 from data.crop_loader import cost_breakdown_per_acre, get_crop, list_crop_keys
 from tools.financials import compute_financial_projection
@@ -57,6 +58,20 @@ def _num(x):
         return float(str(x).replace(",", "").strip())
     except (ValueError, TypeError):
         return None
+
+
+def _profile_area(profile):
+    """Return a positive acreage or an explainable validation error."""
+    raw = (profile or {}).get("farm_size_acres")
+    if raw is None or raw == "":
+        return 1.0, None
+    area = _num(raw)
+    if area is None or not isfinite(area) or area <= 0:
+        return None, (
+            "farm_size_acres must be a positive finite number; "
+            f"received {raw!r}."
+        )
+    return area, None
 
 
 # ---------------------------------------------------------------------------
@@ -303,13 +318,32 @@ def score_crop(crop_key, profile, weather_summary, today=None):
     this for each crop and sorts, so a single crop scores identically whether
     asked about on its own or inside a ranking.
     """
-    rec = get_crop(crop_key)
+    try:
+        rec = get_crop(crop_key)
+    except (AttributeError, TypeError):
+        rec = None
     if rec is None:
-        return {"error": f"Unknown crop '{crop_key}'. Supported: {', '.join(list_crop_keys())}"}
+        message = (
+            f"Unknown crop '{crop_key}'. Supported: "
+            f"{', '.join(list_crop_keys())}"
+        )
+        return {
+            "error": message,
+            "reasons": [
+                f"Crop suitability was not scored: {message}"
+            ],
+        }
     today = today or date.today()
     profile = profile or {}
     wx = _extract_weather(weather_summary)
-    area = _num(profile.get("farm_size_acres")) or 1.0
+    area, area_error = _profile_area(profile)
+    if area_error:
+        return {
+            "error": area_error,
+            "reasons": [
+                f"Crop suitability was not scored: {area_error}"
+            ],
+        }
 
     soil_s, soil_r = _score_soil(rec, profile)
     season_s, season_r = _score_season(rec, profile, today)
@@ -354,19 +388,81 @@ def rank_crops(profile, weather_summary, today=None, top_n=5):
     """
     today = today or date.today()
     profile = profile or {}
-    area = _num(profile.get("farm_size_acres")) or 1.0
+    area, area_error = _profile_area(profile)
+    target = _normalize_season(profile.get("target_season")) or infer_season(today)
+    season_used = SEASON_DISPLAY.get(target, target)
+    season_source = (
+        "stated"
+        if _normalize_season(profile.get("target_season"))
+        else "inferred from date"
+    )
+    if area_error:
+        return {
+            "error": area_error,
+            "as_of_date": today.isoformat(),
+            "season_used": season_used,
+            "season_source": season_source,
+            "area_acres": profile.get("farm_size_acres"),
+            "weights": WEIGHTS,
+            "ranked": [],
+            "also_ranked": [],
+            "reasons": [f"Crop ranking was not computed: {area_error}"],
+        }
 
     scored = [score_crop(k, profile, weather_summary, today=today) for k in list_crop_keys()]
     scored.sort(key=lambda c: c["overall_score"], reverse=True)
-    target = _normalize_season(profile.get("target_season")) or infer_season(today)
+    ranked = scored[:top_n]
+    also_ranked = [
+        {"crop": c["crop"], "overall_score": c["overall_score"]}
+        for c in scored[top_n:]
+    ]
+    reasons = [
+        (
+            f"Ranking context: as_of_date={today.isoformat()}, "
+            f"season_used={season_used}, season_source={season_source}, "
+            f"area_acres={area}; weights={WEIGHTS}."
+        )
+    ]
+    for index, candidate in enumerate(ranked, start=1):
+        components = candidate["components"]
+        economics = candidate["economics"]
+        reasons.append(
+            (
+                f"Rank {index}: crop={candidate['crop']}, "
+                f"label={candidate['label']!r}, "
+                f"overall_score={candidate['overall_score']}; "
+                f"soil_fit={components['soil_fit']}, "
+                f"season_fit={components['season_fit']}, "
+                f"water_fit={components['water_fit']}, "
+                f"temp_fit={components['temp_fit']}, "
+                f"profit_score={components['profit_score']}; "
+                f"total_cost_bdt={economics['total_cost_bdt']}, "
+                f"revenue_bdt={economics['revenue_bdt']}, "
+                f"net_profit_bdt={economics['net_profit_bdt']}, "
+                f"roi_pct={economics['roi_pct']}. "
+                f"Computed rationale: {' | '.join(candidate['reasons'])}"
+            )
+        )
+    if also_ranked:
+        reasons.append(
+            "Remaining ranking: "
+            + "; ".join(
+                f"crop={candidate['crop']}, "
+                f"overall_score={candidate['overall_score']}"
+                for candidate in also_ranked
+            )
+            + "."
+        )
+
     return {
         "as_of_date": today.isoformat(),
-        "season_used": SEASON_DISPLAY.get(target, target),
-        "season_source": "stated" if _normalize_season(profile.get("target_season")) else "inferred from date",
+        "season_used": season_used,
+        "season_source": season_source,
         "area_acres": area,
         "weights": WEIGHTS,
-        "ranked": scored[:top_n],
-        "also_ranked": [{"crop": c["crop"], "overall_score": c["overall_score"]} for c in scored[top_n:]],
+        "ranked": ranked,
+        "also_ranked": also_ranked,
+        "reasons": reasons,
     }
 
 

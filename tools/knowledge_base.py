@@ -78,18 +78,34 @@ def search_knowledge_base(query, n_results=4, crop_filter=None):
     has the longest fertilizer section rather than the one being asked
     about.
     """
-    collection = _get_collection()
+    effective_crop = None
+    try:
+        # Auto-detect the crop from the query if the caller didn't pass one.
+        effective_crop = (crop_filter or _detect_crop(query))
+        if effective_crop:
+            effective_crop = effective_crop.lower()
 
-    # Auto-detect the crop from the query if the caller didn't pass one.
-    effective_crop = (crop_filter or _detect_crop(query))
-    if effective_crop:
-        effective_crop = effective_crop.lower()
+        collection = _get_collection()
 
-    # Pull a wide pool so crop-matching chunks are available to promote.
-    # Chroma embeds `query` with the collection's own embedding function,
-    # so it must be the same one used at ingest time (ONNX MiniLM).
-    pool_size = max(n_results * 4, 12)
-    results = collection.query(query_texts=[query], n_results=pool_size)
+        # Pull a wide pool so crop-matching chunks are available to promote.
+        # Chroma embeds `query` with the collection's own embedding function,
+        # so it must be the same one used at ingest time (ONNX MiniLM).
+        pool_size = max(n_results * 4, 12)
+        results = collection.query(query_texts=[query], n_results=pool_size)
+    except Exception as exc:
+        message = f"Knowledge-base retrieval failed for query {query!r}: {exc}"
+        return {
+            "error": message,
+            "query": query,
+            "crop_filter_applied": effective_crop,
+            "results": [],
+            "reasons": [
+                (
+                    f"No knowledge-base evidence was returned for query={query!r}, "
+                    f"crop_filter_applied={effective_crop!r}: {exc}"
+                )
+            ],
+        }
 
     docs = results.get("documents", [[]])[0]
     metas = results.get("metadatas", [[]])[0]
@@ -110,19 +126,38 @@ def search_knowledge_base(query, n_results=4, crop_filter=None):
 
     ranked = ranked[:n_results]
 
+    evidence = [
+        {
+            "text": doc,
+            "source_file": meta.get("source_file"),
+            "source_title": meta.get("title"),
+            "source_url": meta.get("source_url"),
+            "relevance_distance": dist,
+        }
+        for doc, meta, dist in ranked
+    ]
+    reasons = [
+        (
+            f"Knowledge-base query={query!r} returned {len(evidence)} "
+            f"passage(s); crop_filter_applied={effective_crop!r}."
+        )
+    ]
+    reasons.extend(
+        (
+            f"Evidence {index}: source_title={item['source_title']!r}, "
+            f"source_file={item['source_file']!r}, "
+            f"source_url={item['source_url']!r}, "
+            f"relevance_distance={item['relevance_distance']}; "
+            f"text={item['text']!r}."
+        )
+        for index, item in enumerate(evidence, start=1)
+    )
+
     return {
         "query": query,
         "crop_filter_applied": effective_crop,
-        "results": [
-            {
-                "text": doc,
-                "source_file": meta.get("source_file"),
-                "source_title": meta.get("title"),
-                "source_url": meta.get("source_url"),
-                "relevance_distance": dist,
-            }
-            for doc, meta, dist in ranked
-        ],
+        "results": evidence,
+        "reasons": reasons,
     }
 
 

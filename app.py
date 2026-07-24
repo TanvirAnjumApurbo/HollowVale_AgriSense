@@ -19,6 +19,7 @@ from memory.session_store import (
     init_session,
     get_conversation_history,
     get_farmer_profile,
+    get_session_facts,
     get_trace_log,
     reset_session,
 )
@@ -29,6 +30,7 @@ init_session()
 with st.sidebar:
     st.header("🔍 Agent trace")
     st.caption("Every tool call this agent has made, with real parameters and raw returned values.")
+    st.caption("Weather data: [Open-Meteo](https://open-meteo.com/)")
 
     profile = get_farmer_profile()
     st.subheader("Farmer profile (known so far)")
@@ -85,6 +87,7 @@ if user_input:
                 user_input,
                 get_farmer_profile(),
                 get_trace_log(),
+                get_session_facts(),
             )
         except Exception as e:
             hist = get_conversation_history()
