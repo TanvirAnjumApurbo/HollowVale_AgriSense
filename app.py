@@ -6,8 +6,6 @@ raw returned values) so a judge can confirm each number in a plan came
 from a real tool call, not the model's imagination.
 """
 
-import os
-
 import requests
 import streamlit as st
 from dotenv import load_dotenv
@@ -15,10 +13,6 @@ from dotenv import load_dotenv
 # Local dev convenience: load a local .env if present. On Streamlit Cloud
 # there is no .env -- credentials come from the Secrets manager instead.
 load_dotenv()
-
-# Base URL of the bdapps CaaS sidecar (server.py). The Streamlit app cannot
-# serve bdapps' inbound callbacks itself, so payments go through the sidecar.
-BDAPPS_SIDECAR_URL = os.environ.get("BDAPPS_SIDECAR_URL", "http://localhost:8000").rstrip("/")
 
 from agent.orchestrator import run_turn
 from agent.prompts import missing_fields
@@ -32,6 +26,17 @@ from memory.session_store import (
     get_turn_traces,
     reset_session,
 )
+
+# Base URL of the bdapps CaaS sidecar (server.py). The Streamlit app cannot
+# serve bdapps' inbound callbacks itself, so payments go through the sidecar.
+# Resolution (secrets-aware, so the deployed app reaches the Render sidecar):
+# BDAPPS_SIDECAR_URL -> BDAPPS_PUBLIC_BASE_URL (same service's public URL)
+# -> local dev default.
+BDAPPS_SIDECAR_URL = (
+    db._get_secret("BDAPPS_SIDECAR_URL")
+    or db._get_secret("BDAPPS_PUBLIC_BASE_URL")
+    or "http://localhost:8000"
+).rstrip("/")
 
 st.set_page_config(page_title="AgriSense AI", page_icon="🌾", layout="wide")
 init_session()
@@ -333,20 +338,26 @@ with st.sidebar:
         pay_desc = st.text_input("For", value="AgriSense season advisory", key="bdapps_desc")
         if st.button("Charge via bdapps", key="bdapps_charge"):
             try:
-                resp = requests.post(
-                    f"{BDAPPS_SIDECAR_URL}/bdapps/checkout",
-                    json={
-                        "msisdn": pay_msisdn,
-                        "amount": float(pay_amount),
-                        "description": pay_desc,
-                    },
-                    timeout=20,
-                )
+                # Generous timeout: the Render free tier spins down when idle
+                # and a cold start can take ~50s before the first response.
+                with st.spinner("Contacting bdapps sidecar (may take up to a "
+                                "minute if it is waking from sleep)..."):
+                    resp = requests.post(
+                        f"{BDAPPS_SIDECAR_URL}/bdapps/checkout",
+                        json={
+                            "msisdn": pay_msisdn,
+                            "amount": float(pay_amount),
+                            "description": pay_desc,
+                        },
+                        timeout=90,
+                    )
                 data = resp.json()
             except Exception as exc:
                 st.error(
                     f"Could not reach the bdapps sidecar at {BDAPPS_SIDECAR_URL}. "
-                    f"Is it running (`uvicorn server:app --port 8000`)? ({exc})"
+                    "If it is the Render free instance it may still be waking "
+                    "up — try again in a minute. For local dev, run "
+                    f"`uvicorn server:app --port 8000`. ({exc})"
                 )
             else:
                 if data.get("status") == "CHARGED":
