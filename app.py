@@ -22,7 +22,7 @@ BDAPPS_SIDECAR_URL = os.environ.get("BDAPPS_SIDECAR_URL", "http://localhost:8000
 
 from agent.orchestrator import run_turn
 from agent.prompts import missing_fields
-from memory import auth, db
+from memory import auth, conversations as convs, db
 from memory.session_store import (
     init_session,
     get_conversation_history,
@@ -62,12 +62,13 @@ def _establish_session(user):
 
 def _logout():
     auth.delete_session(st.session_state.get("auth_token"))
-    for key in ("auth_user", "auth_token"):
+    for key in ("auth_user", "auth_token", "active_conversation_id"):
         st.session_state.pop(key, None)
-    try:
-        del st.query_params["session"]
-    except KeyError:
-        pass
+    for param in ("session", "c"):
+        try:
+            del st.query_params[param]
+        except KeyError:
+            pass
     reset_session()
     st.rerun()
 
@@ -146,11 +147,90 @@ current_user = _resolve_user()
 if current_user is None:
     _login_screen()
 
+# Guests (only possible with no DATABASE_URL configured) get session-only
+# chats; authenticated users get Neon-backed persistence.
+_is_persistent = current_user["id"] is not None
+
+
+# --- Conversation persistence -------------------------------------------
+
+def _load_conversation(conversation_id):
+    """Restore transcript + agent memory (profile, facts, trace) from Neon."""
+    conv = convs.get_conversation(current_user["id"], conversation_id)
+    if conv is None:
+        return False
+    rows = convs.load_messages(current_user["id"], conversation_id) or []
+    history, flat_trace = [], []
+    for row in rows:
+        history.append({"role": row["role"], "content": row["content"]})
+        if row.get("trace"):
+            flat_trace.extend(row["trace"])
+    st.session_state["conversation_history"] = history
+    st.session_state["farmer_profile"] = conv["farmer_profile"] or {}
+    # Partial/legacy fact records are tolerated: session_store and the
+    # orchestrator both re-fill missing fact keys with None on access.
+    st.session_state["session_facts"] = conv["session_facts"] or {}
+    st.session_state["trace_log"] = flat_trace
+    st.session_state["active_conversation_id"] = conversation_id
+    st.query_params["c"] = str(conversation_id)
+    return True
+
+
+def _start_new_chat():
+    reset_session()
+    st.session_state["active_conversation_id"] = None
+    try:
+        del st.query_params["c"]
+    except KeyError:
+        pass
+
+
+# On the first script run of a browser session (fresh tab, refresh, or just
+# after login) reopen the conversation named in the URL, else the most
+# recent one. The key's presence marks that restore already happened, so a
+# deliberate "New chat" (active id None) is never overridden.
+if _is_persistent and "active_conversation_id" not in st.session_state:
+    _restored = False
+    _c_param = st.query_params.get("c")
+    if _c_param and str(_c_param).isdigit():
+        _restored = _load_conversation(int(_c_param))
+    if not _restored:
+        _recent = convs.list_conversations(current_user["id"])
+        if _recent:
+            _restored = _load_conversation(_recent[0]["id"])
+    if not _restored:
+        _start_new_chat()
+
 with st.sidebar:
     account_col, logout_col = st.columns([3, 1])
     account_col.markdown(f"👤 **{current_user['username']}**")
     if logout_col.button("Log out", key="logout_btn"):
         _logout()
+    st.divider()
+
+    if st.button("➕ New chat", use_container_width=True, key="new_chat_btn"):
+        _start_new_chat()
+        st.rerun()
+    if _is_persistent:
+        chat_rows = convs.list_conversations(current_user["id"])
+        active_id = st.session_state.get("active_conversation_id")
+        for row in chat_rows:
+            is_active = row["id"] == active_id
+            label = ("🟢 " if is_active else "") + (row["title"] or "New chat")
+            if st.button(
+                label,
+                key=f"conv_{row['id']}",
+                use_container_width=True,
+                disabled=is_active,
+            ):
+                if _load_conversation(row["id"]):
+                    st.rerun()
+                else:
+                    st.toast("⚠️ Could not open that conversation.")
+        if not chat_rows:
+            st.caption("No saved chats yet — send a message to start one.")
+    else:
+        st.caption("Guest mode: chats are not saved.")
     st.divider()
 
     st.header("🔍 Agent trace")
@@ -252,6 +332,9 @@ if user_input:
     # user's message AND the error here -- otherwise the rerun below redraws
     # history from scratch and the failed turn (message + error) silently
     # disappears, making the app look like it ignored the user.
+    # Marks where this turn's tool calls start in the flat trace, so the
+    # slice belonging to this assistant turn can be persisted with it.
+    trace_start = len(get_trace_log())
     with st.spinner("Thinking..."):
         try:
             run_turn(
@@ -273,6 +356,40 @@ if user_input:
                 "arguments": {"user_input": user_input},
                 "result": {"exception": repr(e)},
             })
+
+    # Persist the completed turn. This branch runs exactly once per
+    # submission (chat_input only returns a value on the submitting rerun,
+    # and we st.rerun() right after), so turns are never double-saved.
+    # Failed turns are saved too -- they are part of the transcript.
+    if _is_persistent:
+        conv_id = st.session_state.get("active_conversation_id")
+        if conv_id is None:
+            conv_id = convs.create_conversation(current_user["id"], user_input)
+            if conv_id is not None:
+                st.session_state["active_conversation_id"] = conv_id
+                st.query_params["c"] = str(conv_id)
+        hist = get_conversation_history()
+        assistant_reply = (
+            hist[-1]["content"]
+            if hist and hist[-1]["role"] == "assistant"
+            else ""
+        )
+        saved = conv_id is not None and convs.append_turn(
+            current_user["id"],
+            conv_id,
+            user_input,
+            assistant_reply,
+            get_trace_log()[trace_start:],
+        )
+        if saved:
+            convs.save_state(
+                current_user["id"],
+                conv_id,
+                get_farmer_profile(),
+                get_session_facts(),
+            )
+        else:
+            st.toast("⚠️ Could not save this turn to the database.")
 
     # The history loop at the top of the script renders every turn (including
     # anything just appended) on this rerun -- so no manual st.chat_message
