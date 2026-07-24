@@ -22,7 +22,7 @@ BDAPPS_SIDECAR_URL = os.environ.get("BDAPPS_SIDECAR_URL", "http://localhost:8000
 
 from agent.orchestrator import run_turn
 from agent.prompts import missing_fields
-from memory import db
+from memory import auth, db
 from memory.session_store import (
     init_session,
     get_conversation_history,
@@ -42,7 +42,117 @@ init_session()
 # to stderr inside memory.db -- never the UI).
 db.ensure_schema()
 
+
+# --- Authentication gate -------------------------------------------------
+# DB-backed sessions: the raw token travels only in the browser's URL query
+# param; the database stores its SHA-256 digest with an expiry. Guest mode
+# exists ONLY when no DATABASE_URL is configured at all (local dev/tests) --
+# the deployed app always requires login.
+
+def _establish_session(user):
+    token = auth.create_session(user["id"])
+    st.session_state["auth_user"] = user
+    if token:
+        st.session_state["auth_token"] = token
+        st.query_params["session"] = token
+    # Never inherit another user's in-memory chat on a shared browser tab.
+    reset_session()
+    st.rerun()
+
+
+def _logout():
+    auth.delete_session(st.session_state.get("auth_token"))
+    for key in ("auth_user", "auth_token"):
+        st.session_state.pop(key, None)
+    try:
+        del st.query_params["session"]
+    except KeyError:
+        pass
+    reset_session()
+    st.rerun()
+
+
+def _resolve_user():
+    """The authenticated user for this browser session, or None."""
+    user = st.session_state.get("auth_user")
+    if user:
+        return user
+    token = st.query_params.get("session")
+    if token:
+        user = auth.get_session_user(token)
+        if user:
+            st.session_state["auth_user"] = user
+            st.session_state["auth_token"] = token
+            return user
+        try:
+            del st.query_params["session"]
+        except KeyError:
+            pass
+    return None
+
+
+def _login_screen():
+    st.title("🌾 AgriSense AI")
+    st.caption("Sign in to build grounded, costed season plans for your farm.")
+
+    if not db.is_configured():
+        st.info(
+            "No database is configured (`DATABASE_URL` is unset), so login and "
+            "saved conversations are unavailable. You can continue as a guest "
+            "for this browser session only."
+        )
+        if st.button("Continue as guest (session-only)"):
+            st.session_state["auth_user"] = {"id": None, "username": "guest"}
+            reset_session()
+            st.rerun()
+        st.stop()
+
+    signin_tab, signup_tab = st.tabs(["Sign in", "Create account"])
+    with signin_tab:
+        with st.form("signin_form"):
+            username = st.text_input("Username")
+            password = st.text_input("Password", type="password")
+            submitted = st.form_submit_button("Sign in", type="primary")
+        if submitted:
+            user = auth.authenticate(username, password)
+            if user:
+                _establish_session(user)
+            elif not db.ping():
+                st.error(
+                    "The database is unreachable right now. "
+                    "Please try again in a minute."
+                )
+            else:
+                st.error("Incorrect username or password.")
+    with signup_tab:
+        with st.form("signup_form"):
+            new_username = st.text_input("Choose a username")
+            new_password = st.text_input("Choose a password", type="password")
+            confirm = st.text_input("Confirm password", type="password")
+            created = st.form_submit_button("Create account", type="primary")
+        if created:
+            if new_password != confirm:
+                st.error("Passwords do not match.")
+            else:
+                user, error = auth.create_user(new_username, new_password)
+                if user:
+                    _establish_session(user)
+                else:
+                    st.error(error)
+    st.stop()
+
+
+current_user = _resolve_user()
+if current_user is None:
+    _login_screen()
+
 with st.sidebar:
+    account_col, logout_col = st.columns([3, 1])
+    account_col.markdown(f"👤 **{current_user['username']}**")
+    if logout_col.button("Log out", key="logout_btn"):
+        _logout()
+    st.divider()
+
     st.header("🔍 Agent trace")
     st.caption("Every tool call this agent has made, with real parameters and raw returned values.")
     st.caption("Weather data: [Open-Meteo](https://open-meteo.com/)")
