@@ -160,6 +160,25 @@ def test_checkout_success_then_receipt(client):
     assert "PAID" in html.text
 
 
+def test_checkout_echoes_request_and_response_envelope(client):
+    """The checkout reply carries the CaaS exchange itself, so the UI can show
+    the request/response pair rather than only the outcome -- and the app
+    password never leaves the sidecar."""
+    body = client.post(
+        "/bdapps/checkout", json={"msisdn": GOOD_MSISDN, "amount": 20}
+    ).json()
+
+    request_payload = body["request"]
+    assert request_payload["subscriberId"].startswith("tel:")
+    assert request_payload["amount"] == "20"
+    assert request_payload["password"] == "***"
+
+    response_payload = body["response"]
+    assert response_payload["statusCode"] == "S1000"
+    assert response_payload["externalTrxId"] == body["reference"]
+    assert response_payload["simulated"] is True
+
+
 def test_checkout_insufficient_balance(client):
     body = client.post(
         "/bdapps/checkout", json={"msisdn": GOOD_MSISDN, "amount": 100000}

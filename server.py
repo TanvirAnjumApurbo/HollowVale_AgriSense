@@ -173,6 +173,12 @@ def checkout(req: CheckoutRequest):
         "balance_after": result.balance_after,
         "receipt_url": _receipt_url(settings, reference),
         "mode": "SIMULATOR" if settings.simulate else "LIVE",
+        # The exact CaaS request/response pair, echoed so the UI can show the
+        # flow instead of only its outcome. `request` is the credential-safe
+        # payload (password masked); `response` is the provider envelope
+        # verbatim, including statusCode/statusDetail.
+        "request": safe_payload,
+        "response": result.raw_response,
     }
 
 

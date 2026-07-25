@@ -39,7 +39,7 @@ The governing principle is **"the LLM narrates; tools decide."** Every number (w
 
 ### Tier 2 — Bonus (implemented, simulator mode)
 
-- **bdapps CaaS payment gateway.** A separate FastAPI sidecar (`server.py`, `bdapps/`) runs the full Charging-as-a-Service checkout → response → callback → receipt flow with a SQLite ledger and simulated operator-balance deduction. It runs against a **deterministic local simulator by default** (`BDAPPS_SIMULATE=true`) that mirrors the documented `S1000` response envelope — no credentials, no network, no real money. See `BDAPPS.md` for the run-through and the human-only portal steps.
+- **bdapps CaaS payment gateway.** A separate FastAPI sidecar (`server.py`, `bdapps/`) runs the full Charging-as-a-Service checkout → response → callback → receipt flow with a SQLite ledger and simulated operator-balance deduction. It runs against a **deterministic local simulator by default** (`BDAPPS_SIMULATE=true`) that mirrors the documented `S1000` response envelope — no credentials, no network, no real money. The checkout panel shows the **exact CaaS request/response pair** behind each charge (app password masked), so the exchange is verifiable rather than claimed — the same principle as the agent trace. The charge amount is quoted from `compute_financial_projection` via `/bdapps/quote`, so money is tool-derived on the payment side too. See `BDAPPS.md` for the run-through and the human-only portal steps.
 
 ## What's real vs. what's mock
 
@@ -108,7 +108,7 @@ For Streamlit Community Cloud, set `OPENAI_API_KEY` (and optionally `DATABASE_UR
 
 ```bash
 pip install -r requirements-dev.txt
-pytest tests/ -q                        # full suite — 197 tests
+pytest tests/ -q                        # full suite — 198 tests
 ```
 
 Deterministic self-checks (no pytest needed):

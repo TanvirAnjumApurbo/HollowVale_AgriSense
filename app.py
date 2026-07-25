@@ -130,6 +130,61 @@ def _profile_field_label(field):
     return PROFILE_FIELD_LABELS.get(field, field.replace("_", " ").capitalize())
 
 
+def _apply_bdapps_quote(crop, area_acres, item):
+    """Ask the sidecar to price this charge from the financial-projection tool
+    and prefill the payment fields with what it returns.
+
+    Writing the widget keys before the rerun is what makes the new values
+    stick: Streamlit prefers stored state over a widget's `value` default.
+    """
+    try:
+        with st.spinner("Getting quote…"):
+            resp = requests.get(
+                f"{BDAPPS_SIDECAR_URL}/bdapps/quote",
+                params={
+                    "crop": crop,
+                    "area_acres": float(area_acres or 1.0),
+                    "item": item,
+                },
+                timeout=90,
+            )
+        quote = resp.json()
+    except Exception:
+        st.error("Could not reach the payment service for a quote.")
+        return
+    if resp.status_code != 200 or "amount" not in quote:
+        st.error(quote.get("error", "This plan could not be quoted."))
+        return
+    st.session_state["bdapps_amount"] = float(quote["amount"])
+    st.session_state["bdapps_desc"] = quote["description"]
+    st.rerun()
+
+
+def _render_caas_exchange(data):
+    """Show the raw bdapps CaaS request/response pair behind a charge.
+
+    Same principle as the agent trace: the outcome is farmer-facing, but the
+    exact exchange stays one click away so it is verifiable rather than
+    claimed. The sidecar masks the app password before echoing the request.
+    """
+    request_payload = data.get("request")
+    response_payload = data.get("response")
+    if not (request_payload or response_payload):
+        return
+    with st.expander("bdapps CaaS exchange (request / response)", expanded=False):
+        st.caption(
+            f"Mode: {data.get('mode', 'SIMULATOR')} · "
+            f"statusCode: {data.get('status_code', '—')} · "
+            f"{data.get('status_detail', '')}"
+        )
+        if request_payload:
+            st.caption("Request → POST /caas/direct/debit")
+            st.json(request_payload)
+        if response_payload:
+            st.caption("Response ←")
+            st.json(response_payload)
+
+
 def _profile_field_value(field, value):
     """Add familiar units to numeric profile values without changing storage."""
     try:
@@ -378,9 +433,21 @@ with st.sidebar:
             "This demo does not charge real money."
         )
         proj = get_session_facts().get("projection") or {}
-        fert = (proj.get("cost_breakdown_bdt") or {}).get("fertilizer")
-        if fert:
-            st.caption(f"Tip: this plan's fertilizer input cost is {fert:,.0f} BDT.")
+        quote_crop = proj.get("crop")
+        if quote_crop:
+            # Price the charge from the same tool that costed the plan, instead
+            # of typing an amount by hand: /bdapps/quote runs
+            # compute_financial_projection, so money stays tool-derived on the
+            # payment side too.
+            st.caption(
+                f"Your plan: {proj.get('label') or quote_crop} · "
+                f"{proj.get('area_acres')} acre"
+            )
+            advisory_col, inputs_col = st.columns(2)
+            if advisory_col.button("Quote advisory fee", key="bdapps_quote_advisory"):
+                _apply_bdapps_quote(quote_crop, proj.get("area_acres"), "advisory")
+            if inputs_col.button("Quote input package", key="bdapps_quote_inputs"):
+                _apply_bdapps_quote(quote_crop, proj.get("area_acres"), "inputs")
         pay_msisdn = st.text_input("Mobile number", value="01700000000", key="bdapps_msisdn")
         pay_amount = st.number_input(
             "Amount (BDT)", min_value=1.0, value=20.0, step=1.0, key="bdapps_amount"
@@ -419,11 +486,13 @@ with st.sidebar:
                     st.markdown(
                         f"[View receipt]({receipt}) · Reference `{data['reference']}`"
                     )
+                    _render_caas_exchange(data)
                 else:
                     st.error(
                         "Payment could not be completed. "
                         "Please check your details and try again."
                     )
+                    _render_caas_exchange(data)
 
     with st.container(key="user_section"):
         st.divider()

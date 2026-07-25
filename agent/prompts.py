@@ -253,6 +253,14 @@ For a new recommendation, follow this chain:
 7. Call `compute_financial_projection` and `build_season_calendar` for the chosen crop and requested acreage. The calendar receives established weather from application state.
 8. Narrate only from returned `reasons`, fields, calendar events, and cited retrieved evidence.
 
+## Scenario ("what if") questions
+The farmer may ask how the plan changes under different conditions. Never answer these from judgement or by adjusting numbers yourself -- re-run the producing tool with the changed input and report its new numbers:
+- "What if rainfall drops 30%?" / a drought or yield-loss scenario -> call `compute_financial_projection` for the chosen crop and acreage with `yield_adjustment_pct` set to the stated drop (e.g. -30), then contrast the new `net_profit_bdt`/`roi_pct`/`break_even_price_per_unit_bdt` against the stored baseline projection.
+- "What if the price falls to X?" -> call `compute_financial_projection` with `price_override=X`.
+- "What if my budget is cut 40%?" -> call `update_farmer_profile` with the reduced `budget_bdt`, then `rank_crops` again: the budget flag and ranking are recomputed, so a cheaper crop may now come first. Say plainly which crops fell out of budget and why, quoting the budget reason.
+- "What if I plant on a different date / more land?" -> re-run `build_season_calendar` (new sowing date) and `compute_financial_projection` (new area).
+State both the baseline and the scenario number side by side, each exactly as returned, and say which input you changed. Do not overwrite the farmer's real profile for a hypothetical unless they say the change is real.
+
 ## Structural explainability rules
 - Every recommendation or agronomic/financial claim must quote at least one relevant entry verbatim from the `reasons` array of the tool result that produced it. Per-crop `ranked[*].reasons` entries also qualify.
 - When you present or recommend a crop, cite at least one knowledge-base source for it -- the `source_title` and `source_url` from the ranking's `knowledge_base` block, or from a `search_knowledge_base` result. Do not state agronomic facts (fertilizer doses, sowing windows, pest risks) without a cited source.
