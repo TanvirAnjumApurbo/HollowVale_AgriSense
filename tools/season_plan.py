@@ -19,7 +19,7 @@ from data.crop_loader import (
     load_input_prices,
     normalize_key,
 )
-from tools.financials import compute_financial_projection
+from tools.financials import compute_financial_projection, organic_alternative
 
 
 RAIN_RISK_THRESHOLD_MM = 10.0
@@ -804,6 +804,16 @@ def build_season_calendar(crop_key, sowing_date, area_acres, weather=None) -> di
         )
     )
 
+    # The organic option rides along with the fertilizer schedule rather than
+    # in its own tool: it is an alternative way to meet the same dose, so it
+    # belongs next to the dates and quantities it would replace. It never
+    # changes the costed plan -- the events and totals above stay chemical.
+    organic = organic_alternative(canonical_key, area)
+    if organic.get("available"):
+        reasons.extend(
+            f"Organic alternative: {reason}" for reason in organic["reasons"]
+        )
+
     return {
         "crop": canonical_key,
         "label": crop["label"],
@@ -819,6 +829,7 @@ def build_season_calendar(crop_key, sowing_date, area_acres, weather=None) -> di
         "weather_adjustments": weather_adjustments,
         "weather_assessment": weather_assessment,
         "warnings": warnings,
+        "organic_alternative": organic,
         "source_refs": sources,
         "date_basis": (
             "Agronomic event dates are sowing_date plus day offsets from "

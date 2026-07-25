@@ -22,6 +22,7 @@ from data.crop_loader import (
     cost_breakdown_per_acre,
     get_crop,
     list_crop_keys,
+    load_input_prices,
     normalize_key,
 )
 
@@ -36,6 +37,186 @@ DATA_SOURCE_NOTE = (
 
 def list_supported_crops():
     return list_crop_keys()
+
+
+# Nutrient content of each priced fertilizer, % by weight. Kept here (not in
+# input_prices.yaml, which is a price list) because it is chemistry, not a
+# market figure: urea is 46% N wherever it is sold.
+NUTRIENT_CONTENT_PCT = {
+    "urea": {"n": 46.0},
+    "dap": {"n": 18.0, "p2o5": 46.0},
+    "ammonium_sulphate": {"n": 21.0},
+    "tsp": {"p2o5": 46.0},
+    "mp": {"k2o": 60.0},
+    "sop": {"k2o": 50.0},
+}
+
+# Well-decomposed cow dung / farmyard manure, % by fresh weight. Low and
+# variable by nature; these are the conventional planning figures used in
+# Bangladeshi extension guidance.
+COW_DUNG_NPK_PCT = {"n": 0.5, "p2o5": 0.25, "k2o": 0.5}
+
+# Share of chemical nitrogen it is safe to replace with manure in one season.
+# Organic N mineralises slowly, so a full swap starves the crop at the split
+# top-dressings; extension guidance caps the substitution rather than
+# eliminating chemical N.
+ORGANIC_N_SUBSTITUTION_PCT = 25.0
+
+
+def organic_alternative(crop, area_acres=1.0):
+    """Cost and quantity of part-substituting the chemical dose with manure.
+
+    Converts the crop's scheduled nitrogen into the cow dung / compost weight
+    that supplies the substitutable share of it, prices both sides, and
+    reports the difference. Returns the same shape as the other tools -- every
+    number with a `reasons` entry naming the input it came from -- so the
+    agent can offer the organic option without doing arithmetic itself.
+    """
+    rec = get_crop(crop)
+    if rec is None:
+        message = (
+            f"Unknown crop '{crop}'. Supported: {', '.join(list_crop_keys())}"
+        )
+        return {
+            "error": message,
+            "reasons": [f"No organic alternative was computed: {message}"],
+        }
+    try:
+        area = float(area_acres)
+    except (TypeError, ValueError):
+        area = 0.0
+    if not isfinite(area) or area <= 0:
+        message = f"area_acres must be a positive number, got {area_acres!r}."
+        return {
+            "error": message,
+            "reasons": [f"No organic alternative was computed: {message}"],
+        }
+
+    prices = load_input_prices()
+    schedule = rec.get("fertilizer_schedule", [])
+
+    # Nitrogen actually scheduled, by material.
+    n_by_input = {}
+    for line in schedule:
+        material = line.get("input")
+        content = NUTRIENT_CONTENT_PCT.get(material, {}).get("n")
+        if not content:
+            continue
+        kg = float(line.get("kg_per_acre", 0) or 0)
+        n_by_input[material] = n_by_input.get(material, 0.0) + kg * content / 100.0
+    chemical_n = round(sum(n_by_input.values()), 2)
+
+    manure_price = prices.get("cow_dung")
+    if chemical_n <= 0 or manure_price is None:
+        note = (
+            "the crop's schedule carries no nitrogen-bearing priced input"
+            if chemical_n <= 0
+            else "cow_dung has no price in data/input_prices.yaml"
+        )
+        return {
+            "crop": normalize_key(crop),
+            "label": rec["label"],
+            "area_acres": round(area, 3),
+            "available": False,
+            "reasons": [
+                f"No organic substitution was costed for {rec['label']}: {note}."
+            ],
+        }
+
+    substituted_n = round(chemical_n * ORGANIC_N_SUBSTITUTION_PCT / 100.0, 2)
+    manure_kg_per_acre = round(substituted_n / (COW_DUNG_NPK_PCT["n"] / 100.0), 1)
+    manure_kg_total = round(manure_kg_per_acre * area, 1)
+    manure_cost = round(manure_kg_total * manure_price, 2)
+
+    # Urea is the split-applied N source, so that is what a manure basal dose
+    # displaces. Price the displaced weight at the same list price.
+    urea_price = prices.get("urea")
+    urea_n = NUTRIENT_CONTENT_PCT["urea"]["n"] / 100.0
+    urea_saved_kg_per_acre = round(substituted_n / urea_n, 1) if "urea" in n_by_input else 0.0
+    urea_saved_kg_total = round(urea_saved_kg_per_acre * area, 1)
+    urea_cost_avoided = round(
+        urea_saved_kg_total * urea_price, 2
+    ) if urea_price is not None else 0.0
+    # Two honest cash cases. Cow dung is normally farm-supplied (crops.yaml
+    # excludes it from the cost breakdown for exactly this reason), in which
+    # case the only cash movement is the urea no longer bought. Priced at the
+    # market rate it is dearer than the urea it replaces -- say both rather
+    # than quietly picking the flattering one.
+    net_change_purchased = round(manure_cost - urea_cost_avoided, 2)
+    net_change_farm_supplied = round(-urea_cost_avoided, 2)
+    tonnes_per_ha = round(manure_kg_per_acre * 2.471 / 1000.0, 2)
+
+    # The manure also supplies P and K, which is part of why farmers use it.
+    p2o5_supplied = round(manure_kg_total * COW_DUNG_NPK_PCT["p2o5"] / 100.0, 2)
+    k2o_supplied = round(manure_kg_total * COW_DUNG_NPK_PCT["k2o"] / 100.0, 2)
+
+    reasons = [
+        (
+            f"Organic option basis: {rec['label']} scheduled nitrogen is "
+            f"{chemical_n} kg N/acre, derived from data/crops.yaml doses at "
+            f"{', '.join(f'{k} {NUTRIENT_CONTENT_PCT[k]['n']}% N' for k in sorted(n_by_input))}. "
+            f"Substituting the safe share ({ORGANIC_N_SUBSTITUTION_PCT:.0f}%) "
+            f"needs {substituted_n} kg N/acre from manure."
+        ),
+        (
+            f"Cow dung / compost quantity: {manure_kg_per_acre} kg/acre "
+            f"({manure_kg_total} kg over {round(area, 3)} acres, about "
+            f"{tonnes_per_ha} t/ha), at {COW_DUNG_NPK_PCT['n']}% N by weight."
+        ),
+        (
+            f"Urea displaced: {urea_saved_kg_per_acre} kg/acre "
+            f"({urea_saved_kg_total} kg total) at 46% N, worth BDT "
+            f"{urea_cost_avoided:,.2f} at BDT {urea_price}/kg."
+        ),
+        (
+            f"Cash effect if the manure is farm-supplied (the usual case, and "
+            f"why data/crops.yaml leaves it out of the cost breakdown): BDT "
+            f"{net_change_farm_supplied:,.2f} -- you simply buy "
+            f"{urea_saved_kg_total} kg less urea, and pay only cartage and "
+            f"spreading labour. If you buy the manure at the BDT "
+            f"{manure_price}/kg list price in data/input_prices.yaml, the "
+            f"{manure_kg_total} kg costs BDT {manure_cost:,.2f} and the switch "
+            f"is BDT {net_change_purchased:,.2f} dearer than the all-chemical "
+            f"dose -- worth it for the soil, not as a way to cut cash cost."
+        ),
+        (
+            f"The same manure also supplies about {p2o5_supplied} kg P2O5 and "
+            f"{k2o_supplied} kg K2O, plus organic matter that improves water "
+            "holding on light soils -- the usual reason for applying it "
+            "beyond the nitrogen alone."
+        ),
+        (
+            "Application: spread and incorporate the manure at land "
+            "preparation, at least 15 days before sowing/transplanting, "
+            "because organic nitrogen mineralises slowly. Keep the remaining "
+            f"{round(chemical_n - substituted_n, 2)} kg N/acre as the "
+            "scheduled chemical top-dressing splits -- do not substitute the "
+            "whole dose."
+        ),
+    ]
+
+    return {
+        "crop": normalize_key(crop),
+        "label": rec["label"],
+        "area_acres": round(area, 3),
+        "available": True,
+        "chemical_n_kg_per_acre": chemical_n,
+        "substitution_pct": ORGANIC_N_SUBSTITUTION_PCT,
+        "substituted_n_kg_per_acre": substituted_n,
+        "cow_dung_kg_per_acre": manure_kg_per_acre,
+        "cow_dung_kg_total": manure_kg_total,
+        "cow_dung_tonnes_per_ha": tonnes_per_ha,
+        "cow_dung_cost_bdt_if_purchased": manure_cost,
+        "urea_displaced_kg_per_acre": urea_saved_kg_per_acre,
+        "urea_displaced_kg_total": urea_saved_kg_total,
+        "urea_cost_avoided_bdt": urea_cost_avoided,
+        "net_cost_change_bdt_if_farm_supplied": net_change_farm_supplied,
+        "net_cost_change_bdt_if_purchased": net_change_purchased,
+        "p2o5_supplied_kg": p2o5_supplied,
+        "k2o_supplied_kg": k2o_supplied,
+        "data_source_note": DATA_SOURCE_NOTE,
+        "reasons": reasons,
+    }
 
 
 def _water_need_label(mm):

@@ -15,7 +15,13 @@ from data.crop_loader import (
     load_crops,
     load_input_prices,
 )
-from tools.financials import compute_financial_projection
+from tools.financials import (
+    COW_DUNG_NPK_PCT,
+    NUTRIENT_CONTENT_PCT,
+    ORGANIC_N_SUBSTITUTION_PCT,
+    compute_financial_projection,
+    organic_alternative,
+)
 
 REQUIRED_KEYS = [
     "label", "seasons", "sowing_window", "duration_days", "soil_suitability",
@@ -82,3 +88,48 @@ def test_projection_cost_is_schedule_derived(key):
     per_acre = cost_breakdown_per_acre(rec)
     assert proj1["total_cost_bdt"] == pytest.approx(round(sum(per_acre.values()), 2))
     assert proj1["roi_pct"] is not None
+
+
+@pytest.mark.parametrize("key", sorted(EXPECTED_CROPS))
+def test_organic_alternative_is_dose_derived_and_scales(key):
+    """The manure substitution is derived from the crop's own nitrogen dose,
+    replaces only the safe share of it, and scales with area."""
+    one = organic_alternative(key, 1)
+    two = organic_alternative(key, 2)
+    assert one["available"] is True
+
+    # Nitrogen comes from the schedule, not a constant.
+    rec = CROPS[key]
+    scheduled_n = sum(
+        line["kg_per_acre"] * NUTRIENT_CONTENT_PCT[line["input"]]["n"] / 100.0
+        for line in rec["fertilizer_schedule"]
+        if line["input"] in NUTRIENT_CONTENT_PCT
+        and "n" in NUTRIENT_CONTENT_PCT[line["input"]]
+    )
+    assert one["chemical_n_kg_per_acre"] == pytest.approx(scheduled_n, abs=0.01)
+
+    # Only the safe share is substituted -- never the whole dose.
+    assert one["substituted_n_kg_per_acre"] < one["chemical_n_kg_per_acre"]
+    assert one["substituted_n_kg_per_acre"] == pytest.approx(
+        scheduled_n * ORGANIC_N_SUBSTITUTION_PCT / 100.0, abs=0.01
+    )
+
+    # The manure supplies exactly the substituted nitrogen at its N content.
+    assert one["cow_dung_kg_per_acre"] * COW_DUNG_NPK_PCT["n"] / 100.0 == pytest.approx(
+        one["substituted_n_kg_per_acre"], abs=0.05
+    )
+    assert two["cow_dung_kg_total"] == pytest.approx(one["cow_dung_kg_total"] * 2)
+
+    # Farm-supplied is a saving (urea not bought); purchased is dearer. Saying
+    # both is the point -- quoting only one would mislead.
+    assert one["net_cost_change_bdt_if_farm_supplied"] <= 0
+    assert (
+        one["net_cost_change_bdt_if_purchased"]
+        > one["net_cost_change_bdt_if_farm_supplied"]
+    )
+    assert one["reasons"]
+
+
+def test_organic_alternative_rejects_bad_input():
+    assert organic_alternative("moon_rice", 1).get("error")
+    assert organic_alternative("rice_boro", 0).get("error")

@@ -253,6 +253,11 @@ For a new recommendation, follow this chain:
 7. Call `compute_financial_projection` and `build_season_calendar` for the chosen crop and requested acreage. The calendar receives established weather from application state.
 8. Narrate only from returned `reasons`, fields, calendar events, and cited retrieved evidence.
 
+## Pest/disease risk and the organic option
+Both are already computed for you -- offer them, do not invent them:
+- `rank_crops` returns `risk.pests` per crop: each tracked pest with the growth-stage day window it falls in, the `sign` to scout for, the `control` to apply, and its `cost_bdt_per_acre`. The `risk` reason also states how the live forecast scaled pest pressure (warm-and-wet raises it, a dry forecast lowers it). Quote those fields when the farmer asks what to watch for; the calendar's `pest` events carry the same windows as dates.
+- `build_season_calendar` returns an `organic_alternative` block (cow dung/compost quantity that replaces the safe share of the scheduled nitrogen, the urea it displaces, and the cash effect farm-supplied vs. purchased), surfaced as the `Organic alternative:` reasons. When a farmer asks about organic/cow dung/compost, or has a tight budget, quote those reasons exactly -- including that it does not replace the whole dose.
+
 ## Scenario ("what if") questions
 The farmer may ask how the plan changes under different conditions. Never answer these from judgement or by adjusting numbers yourself -- re-run the producing tool with the changed input and report its new numbers:
 - "What if rainfall drops 30%?" / a drought or yield-loss scenario -> call `compute_financial_projection` for the chosen crop and acreage with `yield_adjustment_pct` set to the stated drop (e.g. -30), then contrast the new `net_profit_bdt`/`roi_pct`/`break_even_price_per_unit_bdt` against the stored baseline projection.

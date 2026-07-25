@@ -338,20 +338,72 @@ def _risk_tier(score):
     return "High"
 
 
-def _score_risk(rec, components, budget_info):
+def _pest_weather_pressure(wx):
+    """How much the forecast raises or lowers pest/disease pressure.
+
+    Warm-and-wet is the condition every extension advisory flags: standing
+    humidity plus 25-35 C is when blast, blight, and hopper populations run.
+    A dry forecast in the same window suppresses them. Returned as a bounded
+    multiplier so the forecast modulates the crop's tracked pest load without
+    ever inventing pressure for a crop with no tracked pests.
+    """
+    rain = wx.get("total_rainfall_mm")
+    tmax = wx.get("avg_max_temp_c")
+    days = wx.get("forecast_days") or 16
+    if rain is None or not isfinite(float(rain)):
+        return 1.0, "no forecast rainfall available, so pest pressure is unmodified"
+
+    rain_per_day = float(rain) / max(float(days), 1.0)
+    warm = tmax is not None and isfinite(float(tmax)) and 25.0 <= float(tmax) <= 35.0
+
+    if rain_per_day >= 8.0:
+        band = "wet"
+        multiplier = 1.30 if warm else 1.15
+    elif rain_per_day >= 3.0:
+        band = "moist"
+        multiplier = 1.15 if warm else 1.05
+    elif rain_per_day >= 1.0:
+        band = "average"
+        multiplier = 1.0
+    else:
+        band = "dry"
+        multiplier = 0.85
+
+    temp_note = (
+        f"{float(tmax):.1f} C average max is in the 25-35 C pest-active band"
+        if warm
+        else (
+            f"{float(tmax):.1f} C average max is outside the 25-35 C pest-active band"
+            if tmax is not None and isfinite(float(tmax))
+            else "no temperature available"
+        )
+    )
+    note = (
+        f"forecast is {band} ({float(rain):.1f} mm over {int(days)} days = "
+        f"{rain_per_day:.1f} mm/day) and {temp_note}, so pest/disease pressure "
+        f"is scaled x{multiplier:.2f}"
+    )
+    return multiplier, note
+
+
+def _score_risk(rec, components, budget_info, wx=None):
     """Derive a Low/Medium/High risk level from adverse agronomic signals.
 
     Reuses the hazard side of the fit components (water/timing/temperature
-    shortfalls) and adds pest/disease pressure (count of the crop's tracked
-    pest windows) and affordability (does the season cost clear the stated
-    budget). Every driver is a 0-1 value named in the returned reason, so the
-    tier is inspectable rather than a black box.
+    shortfalls) and adds pest/disease pressure and affordability (does the
+    season cost clear the stated budget). Pest pressure starts from the count
+    of the crop's tracked pest windows and is then scaled by the live forecast
+    -- warm-and-wet weather raises it, a dry forecast lowers it -- so the tier
+    responds to conditions, not just to the crop. Every driver is a 0-1 value
+    named in the returned reason, so the tier is inspectable rather than a
+    black box.
     """
     pests = rec.get("pest_windows") or []
     pest_count = len(pests)
+    weather_multiplier, weather_note = _pest_weather_pressure(wx or {})
     drivers = {
         "water_stress": round(_clamp(1.0 - components["water_fit"]), 2),
-        "pest_pressure": round(_clamp(pest_count / 4.0), 2),
+        "pest_pressure": round(_clamp((pest_count / 4.0) * weather_multiplier), 2),
         "off_window_timing": round(_clamp(1.0 - components["season_fit"]), 2),
         "temperature_stress": round(_clamp(1.0 - components["temp_fit"]), 2),
         "affordability": 1.0 if budget_info.get("affordable") is False else 0.0,
@@ -383,7 +435,7 @@ def _score_risk(rec, components, budget_info):
         f"Risk {level} ({score:.2f}/1.0) — {headline}. Factors: "
         f"water stress {drivers['water_stress']:.2f}, "
         f"pest/disease pressure {drivers['pest_pressure']:.2f} "
-        f"({pest_count} tracked pest window(s): {pest_names}), "
+        f"({pest_count} tracked pest window(s): {pest_names}; {weather_note}), "
         f"off-window timing {drivers['off_window_timing']:.2f}, "
         f"temperature stress {drivers['temperature_stress']:.2f}, "
         f"budget {drivers['affordability']:.2f} ({budget_note}). "
@@ -394,6 +446,18 @@ def _score_risk(rec, components, budget_info):
         "score": score,
         "drivers": drivers,
         "top_factors": top_factors,
+        "weather_multiplier": round(weather_multiplier, 2),
+        "pests": [
+            {
+                "pest": p.get("pest"),
+                "day_from": p.get("day_from"),
+                "day_to": p.get("day_to"),
+                "sign": p.get("sign"),
+                "control": p.get("control"),
+                "cost_bdt_per_acre": p.get("cost_bdt_per_acre"),
+            }
+            for p in pests
+        ],
     }, reason
 
 
@@ -452,7 +516,7 @@ def score_crop(crop_key, profile, weather_summary, today=None):
         "profit_score": profit_s,
     }
     overall = round(sum(components[k] * WEIGHTS[k] for k in WEIGHTS), 3)
-    risk_info, risk_r = _score_risk(rec, components, budget_info)
+    risk_info, risk_r = _score_risk(rec, components, budget_info, wx)
 
     return {
         "crop": proj["crop"],
