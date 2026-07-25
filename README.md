@@ -31,13 +31,13 @@ The agent gathers a farmer's situation (location, farm size, soil type, water av
 | Agronomic knowledge base (fertilizer doses, sowing windows, irrigation schedules, pest risk, soil types) | **Real** -- sourced from public institutional documents (see `data/raw/*.md`, each with a `Source:` line): Bangladesh Agro-Meteorological Information Service (BAMIS)/Department of Agricultural Extension (DAE) package-and-practices pages, Bangladesh Rice Research Institute (BRRI), Bangladesh Agricultural Research Institute (BARI), and Bangladesh Jute Research Institute (BJRI) guidance covering all 13 crops (Boro/Aman/Aus rice, wheat, maize, potato, lentil, jute, mustard, onion, chili, tomato, chickpea), plus Banglapedia's soil-type and agro-ecological-zone reference. The canonical **BARC Fertilizer Recommendation Guide 2024 (FRG-2024)** is now included as five curated, sourced documents distilled from the official chapters -- per-crop fertilizer doses, fertilizer types and use, agro-ecological-zone soil fertility, climate-smart soil management, and the national crop calendar. |
 | Fertilizer cost in the financial calculator | **Derived (inspectable)** -- summed from each crop's real dose schedule in `data/crops.yaml` priced by `data/input_prices.yaml` (`fertilizer cost = sum(kg/acre x input price)`), not a flat guess. Source doses are unit-converted correctly (BAMIS kg/bigha x3 -> kg/acre; BARC/BARI kg/ha / 2.471 -> kg/acre), which the doc-table numbers can be audited against. |
 | Crop yield and market price figures | **Estimated** -- ballpark per-acre yield and price figures for a hackathon demo, not pulled from a live market feed. Clearly labeled as such in every financial projection returned by the tool (`data_source_note` field). `data/crops.yaml` + `data/input_prices.yaml` are the single source of truth shared by the financial and agronomy engines. |
-| LLM | **Real** -- OpenAI `gpt-4o-mini` via the OpenAI API, used for conversation, tool-call planning, and explanation only (never for arithmetic). |
+| LLM | **Real** -- OpenAI `gpt-5` via the OpenAI API, used for conversation, tool-call planning, and explanation only (never for arithmetic). |
 
 ## Architecture
 
 - **`app.py`** -- Streamlit chat UI + a sidebar trace panel. Single process, no separate backend server needed for Tier 0 (or for Tier 2's bdapps CaaS call, which is a synchronous outbound REST call -- see below).
 - **`agent/`** -- the agent itself:
-  - `llm.py` -- provider-agnostic `chat()` wrapper (OpenAI `gpt-4o-mini` by default; swappable to Groq/other via `LLM_PROVIDER`).
+  - `llm.py` -- provider-agnostic `chat()` wrapper (OpenAI `gpt-5` by default; swappable to Groq/other via `LLM_PROVIDER`).
   - `prompts.py` -- system prompt construction, required-field tracking, compact established-fact digest, exact-reason quoting rules, and the intake-to-calendar workflow.
   - `orchestrator.py` -- a hand-rolled tool-calling loop (no agent framework). Every tool call, its arguments, and its raw result are captured into a trace log. Successful decision facts are also persisted, and same-location weather requests are served from the established session fact instead of refetching unless the farmer explicitly requests a refresh.
 - **`tools/`** -- the agent's real capabilities:
@@ -71,7 +71,7 @@ For Streamlit Community Cloud deployment, set `OPENAI_API_KEY` (and optionally `
 ## Tools and APIs used
 
 - **[Open-Meteo](https://open-meteo.com/en/docs)** (geocoding + forecast APIs) -- the open-access endpoint used here needs no account/key for non-commercial evaluation/prototyping. [Paid commercial plans](https://open-meteo.com/en/pricing) use an API key and the dedicated `customer-api.open-meteo.com` endpoint; [attribution is required](https://open-meteo.com/en/license) and is displayed in the app sidebar.
-- **OpenAI API** (`gpt-4o-mini`) -- requires `OPENAI_API_KEY`.
+- **OpenAI API** (`gpt-5`) -- requires `OPENAI_API_KEY`.
 - **ChromaDB** -- local, in-process vector store, no external service.
 - **ChromaDB ONNX embeddings** (`all-MiniLM-L6-v2`) -- local embeddings via Chroma's bundled ONNX runtime (no PyTorch), no API call, works offline once the model is downloaded.
 

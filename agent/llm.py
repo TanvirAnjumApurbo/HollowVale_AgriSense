@@ -1,6 +1,6 @@
 """Provider-agnostic chat() wrapper around the LLM.
 
-Defaults to OpenAI gpt-4o-mini (real API credit confirmed for this
+Defaults to OpenAI gpt-5 (real API credit confirmed for this
 event). Swapping to Groq (free) or another OpenAI-compatible/Anthropic
 provider only requires changing LLM_PROVIDER/LLM_MODEL and adding the
 matching client branch below -- the orchestrator only ever calls chat().
@@ -32,7 +32,7 @@ def _get_secret(key, default=None):
 
 
 LLM_PROVIDER = _get_secret("LLM_PROVIDER", "openai")
-LLM_MODEL = _get_secret("LLM_MODEL", "gpt-4o-mini")
+LLM_MODEL = _get_secret("LLM_MODEL", "gpt-5")
 # Speed<->depth lever for reasoning models (GPT-5 family, o-series):
 # minimal | low | medium | high. Blank/unset => the provider default (medium
 # for GPT-5). Withheld for non-reasoning models (gpt-4o*, gpt-4.1*), which
@@ -83,7 +83,7 @@ def chat(messages, tools=None, tool_choice="auto"):
     """
     if LLM_PROVIDER == "groq":
         client = _get_groq_client()
-        model = LLM_MODEL if LLM_MODEL != "gpt-4o-mini" else "llama-3.3-70b-versatile"
+        model = LLM_MODEL if LLM_MODEL != "gpt-5" else "llama-3.3-70b-versatile"
     else:
         client = _get_openai_client()
         model = LLM_MODEL

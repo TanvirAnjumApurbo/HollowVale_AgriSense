@@ -94,7 +94,7 @@ The Tier-2 payment feature is a **separate FastAPI process**, not part of the St
 
 ## Other conventions
 
-- `agent/llm.py::chat()` is the only LLM entry point (OpenAI `gpt-4o-mini` default; swap via `LLM_PROVIDER`/`LLM_MODEL`). Secrets resolve **Streamlit secrets → env var** via `_get_secret`, so the app runs both on Streamlit Cloud and from a local `.env`.
+- `agent/llm.py::chat()` is the only LLM entry point (OpenAI `gpt-5` default; swap via `LLM_PROVIDER`/`LLM_MODEL`). Secrets resolve **Streamlit secrets → env var** via `_get_secret`, so the app runs both on Streamlit Cloud and from a local `.env`.
 - `memory/session_store.py` is the state seam for durable persistence. Its current Streamlit-session backend already preserves conversation/profile/trace plus established facts across turns; keep its function signatures stable so swapping to SQLite/Postgres needs no changes in `app.py`/`orchestrator.py`. (Note: repo `memory/` is a Python package, unrelated to any Claude memory.)
 - The Open-Meteo endpoints in `tools/weather.py` are the open-access endpoints: no account/API key is needed for this non-commercial prototype. Commercial capacity/licensing uses the paid customer endpoint and an API key; preserve Open-Meteo attribution.
 - Embeddings are Chroma's bundled ONNX `all-MiniLM-L6-v2` (no PyTorch). The same embedding function must be used at ingest and query time.
