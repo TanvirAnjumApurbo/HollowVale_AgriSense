@@ -4,9 +4,15 @@ Defaults to OpenAI gpt-4o-mini (real API credit confirmed for this
 event). Swapping to Groq (free) or another OpenAI-compatible/Anthropic
 provider only requires changing LLM_PROVIDER/LLM_MODEL and adding the
 matching client branch below -- the orchestrator only ever calls chat().
+
+LLM_REASONING_EFFORT (minimal|low|medium|high) trades latency for depth on
+reasoning models; it is sent only to models that accept it (the GPT-5 family
+and o-series) and is a no-op otherwise.
 """
 
 import os
+import re
+
 
 def _get_secret(key, default=None):
     """Look up a secret from Streamlit secrets first, then env vars.
@@ -27,6 +33,13 @@ def _get_secret(key, default=None):
 
 LLM_PROVIDER = _get_secret("LLM_PROVIDER", "openai")
 LLM_MODEL = _get_secret("LLM_MODEL", "gpt-4o-mini")
+# Speed<->depth lever for reasoning models (GPT-5 family, o-series):
+# minimal | low | medium | high. Blank/unset => the provider default (medium
+# for GPT-5). Withheld for non-reasoning models (gpt-4o*, gpt-4.1*), which
+# reject the parameter, and ignored if set to an unrecognized value.
+LLM_REASONING_EFFORT = (_get_secret("LLM_REASONING_EFFORT", "") or "").strip().lower()
+
+_REASONING_EFFORTS = {"minimal", "low", "medium", "high"}
 
 _client = None
 
@@ -53,6 +66,15 @@ def _get_groq_client():
     return _client
 
 
+def _supports_reasoning_effort(model):
+    """True for models that accept a ``reasoning_effort`` argument -- the GPT-5
+    family (``gpt-5``, ``gpt-5-mini``, ...) and the o-series (``o1``/``o3``/
+    ``o4``...). Classic chat models (``gpt-4o*``, ``gpt-4.1*``) reject it, so it
+    must be withheld for them. Tolerates a provider prefix like ``openai/``."""
+    name = (model or "").lower().split("/")[-1]
+    return name.startswith("gpt-5") or bool(re.match(r"o\d", name))
+
+
 def chat(messages, tools=None, tool_choice="auto"):
     """Send messages (+ optional tool schemas) to the configured LLM.
 
@@ -70,6 +92,10 @@ def chat(messages, tools=None, tool_choice="auto"):
     if tools:
         kwargs["tools"] = tools
         kwargs["tool_choice"] = tool_choice
+    # Send reasoning_effort only when configured AND the model supports it, so
+    # this stays a no-op for gpt-4o-mini/gpt-4.1 and for the API's own default.
+    if LLM_REASONING_EFFORT in _REASONING_EFFORTS and _supports_reasoning_effort(model):
+        kwargs["reasoning_effort"] = LLM_REASONING_EFFORT
 
     response = client.chat.completions.create(**kwargs)
     return response.choices[0].message
