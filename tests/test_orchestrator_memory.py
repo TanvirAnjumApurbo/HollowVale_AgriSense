@@ -592,6 +592,7 @@ def test_season_calendar_returns_the_canonical_explainable_schema():
         "labour",
         "fertilizer",
         "irrigation",
+        "weed",
         "pest",
         "harvest",
     }

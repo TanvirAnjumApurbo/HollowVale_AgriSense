@@ -1,93 +1,126 @@
 # AgriSense AI
 
-An agentic advisor that takes a farmer from a short conversation to a grounded, explained, costed season plan -- built for the IUT ICT Fest Agentic AI Hackathon (sponsored by bdapps, powered by Codex).
+An agentic advisor that takes a Bangladeshi smallholder farmer from a short, vague conversation to a grounded, explained, costed season plan — and keeps advising through the season. Built for the **IUT ICT Fest Agentic AI Hackathon** (sponsored by bdapps, powered by Codex).
 
-> Submission note: rename this repository to `TeamName-AgriSense` (with your actual team name) before submitting, per the hackathon's naming requirement.
+**Team:** HollowVale
 
-## What this is
+## What it does
 
-The agent gathers a farmer's situation (location, farm size, soil type, water availability, budget, target season) through conversation, pulls a real live weather forecast, ranks candidate crops with a deterministic financial model grounded in a retrieved agronomic knowledge base, and produces a dated, costed season plan with every recommendation tied back to the specific data behind it.
+From a vague opener ("I want to grow something this year"), the agent:
 
-## Tier reached
+1. holds a conversation to collect the farm's specifics — location, farm size, soil type, water availability, budget — asking targeted follow-ups **only for the fields still missing**;
+2. pulls a **live** weather forecast for the farm's location and uses the returned rainfall/temperature verbatim;
+3. ranks candidate crops with a deterministic, date-aware scoring engine, grounded in a retrieved agronomic knowledge base;
+4. builds a dated, costed season plan for the chosen crop, from land preparation to harvest; and
+5. explains every recommendation with the exact farm inputs and retrieved evidence behind it — with every tool call, its arguments, and its raw return value visible in a trace panel.
 
-**Tier 0 (core), complete end to end:**
+The governing principle is **"the LLM narrates; tools decide."** Every number (weather, cost, yield, ROI, break-even, risk) and every crop ranking comes from deterministic Python tools that emit their reasoning **as data**; the model gathers intake, chains the tool calls, and explains the results. It never does arithmetic or invents a figure — and the system prompt forbids stating any claim that no tool `reasons` entry supports.
 
-1. Conversational intake with targeted follow-ups for missing fields only.
-2. Live weather grounding via a real API (Open-Meteo), used verbatim in recommendations.
-3. Crop recommendation: a deterministic multi-factor scoring engine (`tools/agronomy.py`) ranks 13 candidate crops on soil fit, season/plantability, water fit vs the live forecast, temperature, and profit/ROI -- returning per-crop component scores, a budget flag (with max affordable area), and quotable reasons that each name the exact input used. It is **date-aware**: asked on 24 July it surfaces Aman rice (whose Kharif-2 window is open now), not Boro (a November-December Rabi crop), because season logic that actually bites is more convincing than profit-sorting.
-4. Deterministic dated season plan (`tools/season_plan.py`): an explicit sowing date plus stored day offsets produces one sourced chronological calendar from land preparation through harvest, with event costs reconciled to the financial projection.
-5. Financial projection: itemized costs, yield, revenue, net profit, ROI, break-even -- computed deterministically, not by the LLM.
-6. Explained reasoning: every agent-facing tool returns a structured `reasons` array. The prompt requires each recommendation to quote a producing-tool reason verbatim and forbids unsupported claims or reworded numbers.
-7. Knowledge base with RAG: real public agronomic sources, chunked and embedded locally, retrieved and grounding every crop/fertilizer/season-plan answer.
-8. Visible agent trace: a sidebar panel logs every tool call, its arguments, and its raw returned value.
+## Which tier each feature reaches
 
-**Tier 1 now implemented:** proactive weather-triggered nitrogen scheduling plus session-coherent facts. If Open-Meteo shows more than 10 mm total rain within 48 hours of a rain-sensitive, non-basal application, the calendar moves it to the first supplied safe forecast day under 5 mm and records the original date, forecast amount, and reason. Successful weather, ranking, chosen crop, projection, and calendar outputs persist for the Streamlit session and are injected into later prompts as a compact digest with verbatim quotable reasons. Acreage-only follow-ups recompute the dependent projection/calendar while reusing the established forecast, so the same farm cannot silently receive different weather numbers.
+### Tier 0 — Core (complete, runs end to end)
 
-## What's real vs mock
+| # | Capability | How it is met |
+|---|---|---|
+| 1 | **Conversational intake** | Tracks 5 required fields (location, farm size, soil, water, budget) and asks only for the ones still missing; the target season is derived deterministically from today's date (`infer_season`) and stated to the farmer, who can override it. `agent/prompts.py`, `agent/orchestrator.py`. |
+| 2 | **Live weather grounding** | Real call to Open-Meteo (geocoding + forecast). The ranking and calendar consume the **injected** forecast from application state — the tool schema exposes no field for the model to pass its own numbers. `tools/weather.py`. |
+| 3 | **Crop recommendation** | A deterministic multi-factor engine ranks 13 candidate crops, each returned with **suitability** (weighted soil/season/water/temp/profit score), **water need** (low/med/high), a **risk level** (Low/Med/High), and a **rough profit/ROI** estimate — every value backed by a quotable reason. `tools/agronomy.py`. |
+| 4 | **Season plan** | A dated calendar from land preparation through harvest: sowing/transplanting window, fertilizer timing, irrigation, **weed-control and pest-scouting checkpoints**, and harvest — event costs reconciled to the financial projection to the cent. `tools/season_plan.py`. |
+| 5 | **Financial projection** | Itemized cost breakdown + expected yield, revenue, net profit, ROI, and break-even, computed in plain Python. Internally consistent: change area/price/yield and every downstream number moves correctly. `tools/financials.py`. |
+| 6 | **Explained reasoning** | Every tool returns a structured `reasons` array naming the exact input used; the prompt requires each claim to quote a producing-tool reason verbatim and forbids reworded numbers or unsupported claims. |
+| 7 | **Knowledge base + RAG** | Real public agronomic sources chunked and embedded locally into Chroma; retrieval grounds crop/fertilizer/season advice. The orchestrator **deterministically** retrieves KB evidence for each top-3 finalist and folds the citations into the ranking, so grounding does not depend on the model choosing to search. `tools/knowledge_base.py`, `data/ingest.py`. |
+| 8 | **Visible agent trace** | A per-turn expandable panel logs every tool call — name, arguments sent, and **raw returned JSON** — persisted alongside each assistant message so a judge can confirm any number came from a real call. `app.py`. |
 
-| Data | Real or mock |
+### Tier 1 — Advanced (implemented)
+
+- **Proactive, weather-triggered scheduling.** If Open-Meteo shows more than 10 mm total rain within 48 hours of a rain-sensitive, non-basal nitrogen application, the calendar moves it to the first supplied forecast day under 5 mm and records the original date, forecast amount, and reason — it never invents a replacement date.
+- **Scenario simulation.** "What if rainfall cuts yield 30%?" or "what if the sale price changes?" recompute the projection through `yield_adjustment_pct` / `price_override`, returning changed numbers rather than a generic answer.
+- **Persistent cross-session memory + accounts.** With a database configured, user accounts (PBKDF2-hashed passwords, hashed session tokens) and **Neon PostgreSQL**-backed conversation persistence let a farmer reopen a prior conversation with the full transcript, trace, profile, and established facts restored. DB-backed per-user/global daily rate limiting protects the API budget. `memory/`.
+
+### Tier 2 — Bonus (implemented, simulator mode)
+
+- **bdapps CaaS payment gateway.** A separate FastAPI sidecar (`server.py`, `bdapps/`) runs the full Charging-as-a-Service checkout → response → callback → receipt flow with a SQLite ledger and simulated operator-balance deduction. It runs against a **deterministic local simulator by default** (`BDAPPS_SIMULATE=true`) that mirrors the documented `S1000` response envelope — no credentials, no network, no real money. See `BDAPPS.md` for the run-through and the human-only portal steps.
+
+## What's real vs. what's mock
+
+| Component | Status |
 |---|---|
-| Weather (rainfall, temperature forecast) | **Real** -- live call to Open-Meteo (forecast + geocoding APIs). The open-access, non-commercial prototype endpoint needs no account/key; commercial customer capacity uses a paid API key. |
-| Agronomic knowledge base (fertilizer doses, sowing windows, irrigation schedules, pest risk, soil types) | **Real** -- sourced from public institutional documents (see `data/raw/*.md`, each with a `Source:` line): Bangladesh Agro-Meteorological Information Service (BAMIS)/Department of Agricultural Extension (DAE) package-and-practices pages, Bangladesh Rice Research Institute (BRRI), Bangladesh Agricultural Research Institute (BARI), and Bangladesh Jute Research Institute (BJRI) guidance covering all 13 crops (Boro/Aman/Aus rice, wheat, maize, potato, lentil, jute, mustard, onion, chili, tomato, chickpea), plus Banglapedia's soil-type and agro-ecological-zone reference. The canonical **BARC Fertilizer Recommendation Guide 2024 (FRG-2024)** is now included as five curated, sourced documents distilled from the official chapters -- per-crop fertilizer doses, fertilizer types and use, agro-ecological-zone soil fertility, climate-smart soil management, and the national crop calendar. |
-| Fertilizer cost in the financial calculator | **Derived (inspectable)** -- summed from each crop's real dose schedule in `data/crops.yaml` priced by `data/input_prices.yaml` (`fertilizer cost = sum(kg/acre x input price)`), not a flat guess. Source doses are unit-converted correctly (BAMIS kg/bigha x3 -> kg/acre; BARC/BARI kg/ha / 2.471 -> kg/acre), which the doc-table numbers can be audited against. |
-| Crop yield and market price figures | **Estimated** -- ballpark per-acre yield and price figures for a hackathon demo, not pulled from a live market feed. Clearly labeled as such in every financial projection returned by the tool (`data_source_note` field). `data/crops.yaml` + `data/input_prices.yaml` are the single source of truth shared by the financial and agronomy engines. |
-| LLM | **Real** -- OpenAI `gpt-5` via the OpenAI API, used for conversation, tool-call planning, and explanation only (never for arithmetic). |
+| Weather (rainfall, temperature forecast) | **Real** — live Open-Meteo forecast + geocoding APIs. The open-access, non-commercial endpoint needs no account/key (commercial capacity uses a paid key); attribution is shown in the app. |
+| Agronomic knowledge base (fertilizer doses, sowing windows, irrigation, pests, soils) | **Real** — sourced from public institutional documents in `data/raw/*.md`, each carrying a `Source:` line: BAMIS/DAE package-&-practice pages, BRRI, BARI, BJRI, the **BARC Fertilizer Recommendation Guide 2024**, the national crop calendar, and Banglapedia soil/AEZ references, covering all 13 crops. |
+| Crop suitability ranking | **Real logic** — deterministic scoring over the real crop data and the live forecast; date-aware (asked in late July it surfaces Aman rice, whose Kharif-2 window is open, not Boro). |
+| Fertilizer cost | **Derived (inspectable)** — `sum(kg/acre × input price)` from each crop's real dose schedule in `data/crops.yaml` priced by `data/input_prices.yaml`, with correct unit conversions — not a flat guess. |
+| Crop yield & market price figures | **Estimated** — ballpark per-acre yield/price for a demo, not a live market feed. Labelled as such in every projection (`data_source_note`). |
+| Crop **risk level** | **Derived (heuristic)** — a Low/Med/High tier computed from real signals (count of the crop's tracked pest windows, forecast-driven water and temperature shortfall, and budget affordability). Not a live pest/disease-forecast feed. |
+| Season-plan **weed checkpoint** | **Derived (heuristic)** — a generic critical-weed-competition window (~15–40% of the crop cycle); `crops.yaml` has no per-crop weeding offsets. Fertilizer/irrigation/pest/stage dates are from the sourced crop data; the nitrogen shift uses the real forecast. |
+| LLM | **Real** — OpenAI `gpt-5` via the OpenAI API, for conversation, tool-call planning, and explanation only (never arithmetic). |
+| Accounts + conversation persistence | **Real when `DATABASE_URL` (Neon) is set**; degrades gracefully to guest / single-session mode when no database is configured. |
+| bdapps CaaS **operator charge** | **Simulated by default** — the request/response/callback/receipt flow, MSISDN validation, ledger, and balance deduction are real; the charge itself deducts from a seeded local balance. The live API is a single documented seam (`bdapps/client.py`), off unless explicitly enabled. |
 
 ## Architecture
 
-- **`app.py`** -- Streamlit chat UI + a sidebar trace panel. Single process, no separate backend server needed for Tier 0 (or for Tier 2's bdapps CaaS call, which is a synchronous outbound REST call -- see below).
-- **`agent/`** -- the agent itself:
-  - `llm.py` -- provider-agnostic `chat()` wrapper (OpenAI `gpt-5` by default; swappable to Groq/other via `LLM_PROVIDER`).
-  - `prompts.py` -- system prompt construction, required-field tracking, compact established-fact digest, exact-reason quoting rules, and the intake-to-calendar workflow.
-  - `orchestrator.py` -- a hand-rolled tool-calling loop (no agent framework). Every tool call, its arguments, and its raw result are captured into a trace log. Successful decision facts are also persisted, and same-location weather requests are served from the established session fact instead of refetching unless the farmer explicitly requests a refresh.
-- **`tools/`** -- the agent's real capabilities:
-  - `weather.py` -- Open-Meteo geocoding + forecast.
-  - `knowledge_base.py` -- RAG retrieval over a local Chroma vector store.
-  - `agronomy.py` -- deterministic multi-factor crop scoring (`score_crop` / `rank_crops`): soil / season / water / temp / profit components, an overall weighted score, a budget flag, and a `reasons` list emitted **as data** so the LLM narrates the reasoning rather than inventing it.
-  - `financials.py` -- deterministic cost/yield/ROI/break-even calculator (plain Python, not LLM arithmetic).
-  - `season_plan.py` -- merges crop stages, fertilizer applications, irrigation checkpoints and pest windows into real ISO dates, adds seed/labour/harvest events, allocates every cost category without cent drift, and applies forecast-backed nitrogen shifts without inventing replacement dates.
-- **`data/`** -- a deliberately **two-layer** knowledge design:
-  - `crops.yaml` + `input_prices.yaml` -- the machine-readable layer (Layer A) that drives the deterministic tools: per-crop seasons, sowing windows, soil suitability, water/temperature needs, dose schedules, pest windows and economics. `crop_loader.py` loads it and derives per-acre costs. This is the single source of truth for both `agronomy.py` and `financials.py`.
-  - `raw/*.md` -- the prose corpus (Layer B) that drives RAG + citations, one sourced document per crop/topic with a `Source:` line.
-  - `ingest.py` chunks and embeds the corpus locally (Chroma's bundled ONNX `all-MiniLM-L6-v2` runtime -- no embedding API call and no PyTorch) into `chroma_db/`. The index is gitignored and rebuilt automatically on first use if missing, so a fresh clone is self-sufficient.
-- **`tests/`** -- schema/cost, retrieval, season-calendar/weather-adjustment, and orchestrator-memory regression suites. The scripted conversation tests run fully offline and verify fact persistence, structured reasons, area-scenario consistency, and no weather network refetch.
-- **`memory/session_store.py`** -- conversation, profile, trace, and established facts (`weather`, `ranking`, `chosen_crop`, `projection`, `calendar`) for the current session. It remains the seam for later durable SQLite/Postgres storage without changing the orchestrator or UI.
+- **`app.py`** — Streamlit chat UI, login gate, and the per-turn trace panel.
+- **`agent/`** — the agent itself:
+  - `llm.py` — provider-agnostic `chat()` wrapper (OpenAI `gpt-5` default; swappable via `LLM_PROVIDER`/`LLM_MODEL`). Secrets resolve Streamlit-secrets → env var.
+  - `prompts.py` — system-prompt construction, required-field tracking, the compact quotable established-fact digest, and the intake-to-calendar workflow with exact-reason-quoting rules.
+  - `orchestrator.py` — a **hand-rolled** tool-calling loop (no LangChain/CrewAI, deliberately, so every step is transparent). Captures every tool call into the trace, persists decision facts, serves same-location weather from cache, and deterministically grounds each finalist in the KB.
+- **`tools/`** — `weather.py` (Open-Meteo), `knowledge_base.py` (Chroma RAG), `agronomy.py` (crop scoring + risk), `financials.py` (cost/yield/ROI/break-even), `season_plan.py` (dated, cost-reconciled calendar + weather-driven nitrogen shift).
+- **`data/`** — a two-layer knowledge design: **Layer A** (`crops.yaml` + `input_prices.yaml`) is the machine-readable single source of truth for the tools; **Layer B** (`raw/*.md`) is the sourced prose corpus for RAG + citations. `ingest.py` embeds it locally into `chroma_db/` (gitignored; rebuilt on first use).
+- **`memory/`** — `db.py` (Neon Postgres pool + schema), `conversations.py` (per-user transcripts/traces/state as JSONB), `auth.py` (accounts + sessions), `rate_limit.py` (usage limits), `session_store.py` (in-session facts). All degrade gracefully without a database.
+- **`server.py` + `bdapps/`** — the independently deployable Tier-2 CaaS sidecar (Render blueprint in `render.yaml`, lean `requirements-sidecar.txt`).
+- **`tests/`** — schema/cost, RAG retrieval, season-calendar/weather-adjustment, orchestrator-memory, persistence/auth, and bdapps suites. The scripted conversation tests run fully offline.
 
 ## Setup
 
 ```bash
 python -m venv .venv
-source .venv/Scripts/activate      # Windows Git Bash; use .venv\Scripts\activate on cmd/PowerShell
+.venv\Scripts\activate                 # PowerShell/cmd; source .venv/Scripts/activate in Git Bash
 pip install -r requirements.txt
 
-cp .env.example .env               # then fill in your real OPENAI_API_KEY
-python data/ingest.py              # builds the local knowledge base index (data/chroma_db/)
+cp .env.example .env                    # then set OPENAI_API_KEY (Copy-Item in PowerShell)
+python data/ingest.py                   # builds the local RAG index (optional — self-heals on first query)
 
 streamlit run app.py
 ```
 
-For Streamlit Community Cloud deployment, set `OPENAI_API_KEY` (and optionally `LLM_PROVIDER`/`LLM_MODEL`) in the app's Secrets manager using `.streamlit/secrets.toml.example` as a template.
+Optional:
 
-## Tools and APIs used
+```bash
+# Tier-2 bdapps CaaS payment sidecar (simulator by default — no creds/network)
+pip install -r requirements-sidecar.txt
+uvicorn server:app --host 0.0.0.0 --port 8000
 
-- **[Open-Meteo](https://open-meteo.com/en/docs)** (geocoding + forecast APIs) -- the open-access endpoint used here needs no account/key for non-commercial evaluation/prototyping. [Paid commercial plans](https://open-meteo.com/en/pricing) use an API key and the dedicated `customer-api.open-meteo.com` endpoint; [attribution is required](https://open-meteo.com/en/license) and is displayed in the app sidebar.
-- **OpenAI API** (`gpt-5`) -- requires `OPENAI_API_KEY`.
-- **ChromaDB** -- local, in-process vector store, no external service.
-- **ChromaDB ONNX embeddings** (`all-MiniLM-L6-v2`) -- local embeddings via Chroma's bundled ONNX runtime (no PyTorch), no API call, works offline once the model is downloaded.
+# Cross-session persistence + accounts: set DATABASE_URL to a Neon Postgres URL
+# (Streamlit secrets or .env). Without it, the app runs in guest/single-session mode.
+```
+
+For Streamlit Community Cloud, set `OPENAI_API_KEY` (and optionally `DATABASE_URL`, `LLM_PROVIDER`/`LLM_MODEL`) in the app's Secrets manager.
+
+## Tools & APIs used
+
+- **[Open-Meteo](https://open-meteo.com/en/docs)** (geocoding + forecast) — open-access endpoint, no key for non-commercial evaluation; attribution shown in-app.
+- **OpenAI API** (`gpt-5`) — requires `OPENAI_API_KEY`.
+- **ChromaDB** + its bundled **ONNX `all-MiniLM-L6-v2`** embeddings — local, in-process, no external service and no PyTorch.
+- **Neon PostgreSQL** (optional) — accounts, conversation persistence, and rate limiting via `DATABASE_URL`.
+- **bdapps CaaS (TAP)** — Tier-2 payment integration, simulator by default; live path documented in `BDAPPS.md`.
+- **FastAPI + Uvicorn** — the bdapps sidecar.
 
 ## Verification
 
-- `pip install -r requirements-dev.txt` then `pytest tests/ -q` -- the dataset + retrieval gate (crop schema, schedule-derived cost consistency, 37 RAG queries each landing the right source doc in the top-3, and whole-word crop-detection checks).
-- `python -m tools.agronomy` -- self-checks the scoring engine: flipping soil (clay vs sandy) changes the top crop, flipping season (Kharif-2 vs Rabi) changes the top crop, halving the budget flips the affordability flag and the max affordable area, and every ranked crop carries >=4 reasons.
-- `python -m tools.financials` -- confirms costs scale linearly with area, yield adjustments move profit correctly, aliases resolve (`rice`->`rice_boro`), and fertilizer cost is the schedule-derived figure.
-- `pytest tests/test_season_plan.py -q` -- confirms exact harvest offsets, chronological/source-complete events, synthetic 40 mm rain rescheduling, strict wet/dry thresholds, no fabricated dry date, and event-to-projection cost reconciliation.
-- `pytest tests/test_orchestrator_memory.py -q` -- scripts a full multi-turn tool chain and verifies established-fact injection, top-level reasons, scenario recomputation, trace-backed reply numbers, and weather-cache reuse.
-- `python tools/weather.py` -- confirms real geocoding + forecast values return for sample Bangladesh locations.
-- `python data/ingest.py` then `python tools/knowledge_base.py` -- confirms retrieval returns topically relevant, correctly-sourced chunks.
-- `streamlit run app.py` -- full conversational walkthrough from a vague opener to a costed season plan, with every tool call visible in the sidebar trace.
+```bash
+pip install -r requirements-dev.txt
+pytest tests/ -q                        # full suite — 197 tests
+```
 
-## Where later upgrades hook in
+Deterministic self-checks (no pytest needed):
 
-- **Durable cross-session memory** -- swap the implemented `memory/session_store.py` session-fact backend to SQLite (or Supabase Postgres), keeping the same interface.
-- **Next agronomy upgrades** -- irrigation rescheduling, pest/disease risk triggers, and broader scenario simulation can extend the same deterministic calendar/tool pattern.
-- **bdapps CaaS payment integration** -- per the official `bdapps-API-DGD` guide, the Direct Debit charge call is a synchronous, merchant-initiated REST call (`POST https://developer.bdapps.com/caas/direct/debit`) with the transaction result returned in the same HTTP response -- no inbound webhook needed, so it drops straight into this same Streamlit app as another outbound tool call once `applicationId`/`password` are provisioned via the bdapps developer portal.
+- `python -m tools.agronomy` — soil/season each flip the top crop, the budget flag flips with budget, and every ranked crop carries a risk tier, a water-need label, and ≥4 reasons.
+- `python -m tools.financials` — cost scales linearly with area, yield/price scenarios move profit correctly, and fertilizer cost equals the schedule-derived figure.
+- `python -m tools.season_plan` — a dated Boro calendar (with a synthetic rain-driven urea shift) whose events reconcile to the financial projection.
+- `python tools/weather.py` — live geocoding + forecast for sample Bangladesh locations.
+- `python data/ingest.py && python tools/knowledge_base.py` — retrieval returns topically relevant, correctly-sourced chunks.
+
+## Notes & limitations
+
+- Yield and market-price figures are demo estimates (labelled in every projection), not a live market feed — the natural next upgrade is a real price source.
+- Risk tiers and the weed-control window are transparent heuristics over the real data, not a dedicated pest/disease-forecast model.
+- Durable memory and accounts require a Neon `DATABASE_URL`; without one the app still runs fully, single-session, as a guest.

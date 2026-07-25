@@ -22,6 +22,7 @@ EXPECTED_BORO_TYPES = {
     "labour",
     "fertilizer",
     "irrigation",
+    "weed",
     "pest",
     "harvest",
 }

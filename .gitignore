@@ -14,3 +14,12 @@ data/bdapps.db-*
 # Never commit it: a partial index (vectors without the doc store) is worse
 # than none, and it must not be tracked half by *.sqlite3 above.
 data/chroma_db/
+
+# Reference source material and local-only notes -- NOT used by the app.
+# The RAG corpus is data/raw/*.md; the source PDFs are just provenance the
+# ingest step never reads (data/ingest.py skips non-.md files). CLAUDE.md is
+# coding-assistant guidance and hackathon_context.md is the organizers' brief.
+*.pdf
+CLAUDE.md
+hackathon_context.md
+.pytest_cache/

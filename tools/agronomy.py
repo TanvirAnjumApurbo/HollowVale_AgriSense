@@ -306,6 +306,98 @@ def _budget_flag(rec, profile, proj, area):
 
 
 # ---------------------------------------------------------------------------
+# risk scoring -> (risk info, reason)
+# ---------------------------------------------------------------------------
+
+# Risk is a weighted blend of adverse signals (higher = riskier), tiered to
+# Low/Medium/High. It deliberately weighs two things suitability does NOT --
+# pest/disease pressure and affordability -- so a high-scoring top pick can
+# still read as Medium risk when it is pest-prone or over budget, which is the
+# downside a farmer actually needs flagged.
+RISK_WEIGHTS = {
+    "water_stress": 0.30,
+    "pest_pressure": 0.30,
+    "off_window_timing": 0.20,
+    "temperature_stress": 0.10,
+    "affordability": 0.10,
+}
+RISK_FACTOR_LABELS = {
+    "water_stress": "water stress",
+    "pest_pressure": "pest/disease pressure",
+    "off_window_timing": "off-window timing",
+    "temperature_stress": "temperature stress",
+    "affordability": "budget/affordability",
+}
+
+
+def _risk_tier(score):
+    if score < 0.25:
+        return "Low"
+    if score < 0.50:
+        return "Medium"
+    return "High"
+
+
+def _score_risk(rec, components, budget_info):
+    """Derive a Low/Medium/High risk level from adverse agronomic signals.
+
+    Reuses the hazard side of the fit components (water/timing/temperature
+    shortfalls) and adds pest/disease pressure (count of the crop's tracked
+    pest windows) and affordability (does the season cost clear the stated
+    budget). Every driver is a 0-1 value named in the returned reason, so the
+    tier is inspectable rather than a black box.
+    """
+    pests = rec.get("pest_windows") or []
+    pest_count = len(pests)
+    drivers = {
+        "water_stress": round(_clamp(1.0 - components["water_fit"]), 2),
+        "pest_pressure": round(_clamp(pest_count / 4.0), 2),
+        "off_window_timing": round(_clamp(1.0 - components["season_fit"]), 2),
+        "temperature_stress": round(_clamp(1.0 - components["temp_fit"]), 2),
+        "affordability": 1.0 if budget_info.get("affordable") is False else 0.0,
+    }
+    score = round(sum(drivers[k] * RISK_WEIGHTS[k] for k in RISK_WEIGHTS), 2)
+    level = _risk_tier(score)
+    contributions = sorted(
+        ((k, drivers[k] * RISK_WEIGHTS[k]) for k in RISK_WEIGHTS),
+        key=lambda kv: kv[1],
+        reverse=True,
+    )
+    top_factors = [
+        RISK_FACTOR_LABELS[k] for k, contribution in contributions if contribution > 0
+    ][:2]
+
+    pest_names = ", ".join(p["pest"] for p in pests) if pests else "none tracked"
+    afford = budget_info.get("affordable")
+    budget_note = (
+        "over the stated budget" if afford is False
+        else "within the stated budget" if afford is True
+        else "no budget stated"
+    )
+    headline = (
+        f"driven by {' and '.join(top_factors)}"
+        if top_factors
+        else "no adverse factors above zero"
+    )
+    reason = (
+        f"Risk {level} ({score:.2f}/1.0) — {headline}. Factors: "
+        f"water stress {drivers['water_stress']:.2f}, "
+        f"pest/disease pressure {drivers['pest_pressure']:.2f} "
+        f"({pest_count} tracked pest window(s): {pest_names}), "
+        f"off-window timing {drivers['off_window_timing']:.2f}, "
+        f"temperature stress {drivers['temperature_stress']:.2f}, "
+        f"budget {drivers['affordability']:.2f} ({budget_note}). "
+        f"Weights {RISK_WEIGHTS}; tiers <0.25 Low, <0.50 Medium, else High."
+    )
+    return {
+        "level": level,
+        "score": score,
+        "drivers": drivers,
+        "top_factors": top_factors,
+    }, reason
+
+
+# ---------------------------------------------------------------------------
 # public API
 # ---------------------------------------------------------------------------
 
@@ -360,11 +452,13 @@ def score_crop(crop_key, profile, weather_summary, today=None):
         "profit_score": profit_s,
     }
     overall = round(sum(components[k] * WEIGHTS[k] for k in WEIGHTS), 3)
+    risk_info, risk_r = _score_risk(rec, components, budget_info)
 
     return {
         "crop": proj["crop"],
         "label": rec["label"],
         "overall_score": overall,
+        "water_need": proj.get("water_need"),
         "components": components,
         "economics": {
             "area_acres": area,
@@ -374,8 +468,9 @@ def score_crop(crop_key, profile, weather_summary, today=None):
             "roi_pct": proj["roi_pct"],
         },
         "budget": budget_info,
+        "risk": risk_info,
         "duration_days": rec["duration_days"],
-        "reasons": [soil_r, season_r, water_r, temp_r, profit_r, budget_r],
+        "reasons": [soil_r, season_r, water_r, temp_r, profit_r, budget_r, risk_r],
     }
 
 
@@ -431,6 +526,9 @@ def rank_crops(profile, weather_summary, today=None, top_n=5):
                 f"Rank {index}: crop={candidate['crop']}, "
                 f"label={candidate['label']!r}, "
                 f"overall_score={candidate['overall_score']}; "
+                f"water_need={candidate.get('water_need')}, "
+                f"risk_level={candidate['risk']['level']}, "
+                f"risk_score={candidate['risk']['score']}; "
                 f"soil_fit={components['soil_fit']}, "
                 f"season_fit={components['season_fit']}, "
                 f"water_fit={components['water_fit']}, "
@@ -514,6 +612,13 @@ if __name__ == "__main__":
     for c in res["ranked"]:
         assert len([r for r in c["reasons"] if r and r.strip()]) >= 4, f"{c['crop']} has too few reasons"
     print(f"[reasons] all {len(res['ranked'])} ranked crops carry >=4 reasons")
+
+    # 5) Every ranked crop carries a risk tier and a water-need label.
+    for c in res["ranked"]:
+        assert c["risk"]["level"] in {"Low", "Medium", "High"}, f"{c['crop']} missing a risk level"
+        assert c.get("water_need") in {"low", "medium", "high", "unknown"}, f"{c['crop']} missing a water-need label"
+    tiers = ", ".join(f"{c['crop']}={c['risk']['level']}" for c in res["ranked"])
+    print(f"[risk]    every ranked crop has a risk tier + water-need label ({tiers})")
 
     print("\nExample top pick today (Kharif-2, clay loam, 2 acres):")
     winner = rank_crops(farm, KHARIF_WX, today=TODAY)["ranked"][0]

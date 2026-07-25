@@ -25,6 +25,15 @@ from tools.financials import compute_financial_projection
 RAIN_RISK_THRESHOLD_MM = 10.0
 DRY_DAY_THRESHOLD_MM = 5.0
 
+# Weed-control checkpoint. crops.yaml carries no explicit weeding offsets, so
+# the critical weed-competition window is derived from the crop cycle (weeds
+# depress yield most in the early season). Weeding labour is already inside
+# labour_bdt_per_acre, so the checkpoint is emitted at zero cost to keep the
+# event total reconciled with the financial projection.
+WEED_WINDOW_START_FRACTION = 0.15
+WEED_WINDOW_END_FRACTION = 0.40
+WEED_WINDOW_MIN_START_DAY = 10
+
 # Materials in input_prices.yaml that supply nitrogen.  Urea is currently the
 # only one used by the crop schedules, but keeping the classification explicit
 # makes the weather rule correct if another priced nitrogen source is added.
@@ -55,8 +64,9 @@ _EVENT_TYPE_ORDER = {
     "seed": 2,
     "fertilizer": 3,
     "irrigation": 4,
-    "pest": 5,
-    "harvest": 6,
+    "weed": 5,
+    "pest": 6,
+    "harvest": 7,
 }
 
 
@@ -657,6 +667,48 @@ def build_season_calendar(crop_key, sowing_date, area_acres, weather=None) -> di
                 cost_source="data/crops.yaml",
             )
         )
+
+    # Weed-control checkpoint: dated and cost-neutral (weeding labour is booked
+    # in the labour event above). This gives the calendar the "weed and pest
+    # checkpoints" the plan calls for, alongside the insect-pest scouting rows.
+    duration_days = int(crop["duration_days"])
+    weed_from = max(
+        WEED_WINDOW_MIN_START_DAY,
+        round(WEED_WINDOW_START_FRACTION * duration_days),
+    )
+    weed_to = round(WEED_WINDOW_END_FRACTION * duration_days)
+    if weed_to <= weed_from:
+        weed_to = weed_from + 1
+    add(
+        _event(
+            sowing + timedelta(days=weed_from),
+            "weed",
+            (
+                "Weed-control checkpoint - keep the crop weed-free through its "
+                "critical early-competition period; hand-weed or apply the "
+                "recommended pre-/post-emergence herbicide"
+            ),
+            f"Inspect / weed {area_text} acre(s)",
+            0,
+            primary_source,
+            end_date=(sowing + timedelta(days=weed_to)).isoformat(),
+            day_offset=weed_from,
+            signs=(
+                "grasses, sedges and broadleaf weeds emerging between rows and "
+                "competing with the young crop for light, water and nutrients"
+            ),
+            cost_category="labour",
+            cost_source="data/crops.yaml",
+            date_anchor=(
+                "Critical weed-competition window, derived as ~"
+                f"{int(WEED_WINDOW_START_FRACTION * 100)}-"
+                f"{int(WEED_WINDOW_END_FRACTION * 100)}% of the "
+                f"{duration_days}-day crop cycle; crops.yaml carries no explicit "
+                "weeding offsets, and weeding labour is already in the season "
+                "labour budget (shown as 0 cost here to avoid double-counting)."
+            ),
+        )
+    )
 
     add(
         _event(

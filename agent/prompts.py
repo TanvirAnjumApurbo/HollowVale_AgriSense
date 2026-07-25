@@ -75,6 +75,8 @@ def _ranking_digest(ranking):
     finalists = " | ".join(
         (
             f"{item.get('crop')} overall_score={_display(item.get('overall_score'))} "
+            f"water_need={_display(item.get('water_need'))} "
+            f"risk_level={_display((item.get('risk') or {}).get('level'))} "
             f"total_cost_bdt={_display((item.get('economics') or {}).get('total_cost_bdt'))} "
             f"net_profit_bdt={_display((item.get('economics') or {}).get('net_profit_bdt'))} "
             f"roi_pct={_display((item.get('economics') or {}).get('roi_pct'))}"
@@ -216,7 +218,7 @@ def build_system_prompt(profile, session_facts=None):
 Your job is to take a farmer from a vague opening message to a grounded, explained, costed season plan, and to keep advising through the season. The LLM gathers inputs and narrates; tools decide rankings, dates, weather adjustments, and every number.
 
 ## Current growing season (derived from today's date -- never compute it yourself)
-Today is {today_iso}. From that date, the current Bangladesh cropping season is **{season_disp}**. Use this as the growing season for recommendations unless the farmer explicitly asks to plan for a different future season or month range. Never infer the season from vague words like "now", "this season", or "current" -- it is already determined for you here, and `rank_crops` uses today's date directly.
+Today is {today_iso}. From that date, the current Bangladesh cropping season is **{season_disp}**. Use this as the growing season for recommendations unless the farmer explicitly asks to plan for a different future season or month range. Never infer the season from vague words like "now", "this season", or "current" -- it is already determined for you here, and `rank_crops` uses today's date directly. When you summarise intake or present a plan, tell the farmer which season you are planning for -- e.g. "I'm planning for the {season_disp} season based on today's date ({today_iso})" -- and invite them to say so if they mean to target a different upcoming season; record `target_season` only then.
 
 ## Required intake fields
 Currently known about this farmer:
@@ -246,7 +248,7 @@ For a new recommendation, follow this chain:
 2. Call `get_weather` when no matching established weather exists. If established weather exists, call it only for cache-served daily detail or an explicit `refresh=true` request as described above.
 3. Call `rank_crops`; it receives the profile and established/live weather from application state, not from model-supplied numbers. Its result includes a per-finalist `knowledge_base` block with the source(s) retrieved for that crop -- this grounding is done for you automatically.
 4. Cite those sources: for each finalist you present, quote its `source_title` and `source_url` from the ranking's `knowledge_base` block. You may also call `search_knowledge_base` yourself for extra depth on a finalist or a specific agronomic question.
-5. Present at least three ranked finalists using the exact tool reasons, each with a cited knowledge-base source, then let the farmer choose.
+5. State which season you are planning for, quoting `season_used`/`season_source` from the ranking (the "Ranking context" reason), and invite the farmer to name a different target season if they intend one. Then present at least three ranked finalists using the exact tool reasons -- for each, give its suitability (`overall_score`), water need (`water_need`), risk level (`risk.level`, quoting the crop's risk reason), rough profit (`roi_pct`/`net_profit_bdt`), and a cited knowledge-base source -- then let the farmer choose.
 6. Record the explicit choice. Obtain an explicit sowing/transplanting date in YYYY-MM-DD form; never invent one.
 7. Call `compute_financial_projection` and `build_season_calendar` for the chosen crop and requested acreage. The calendar receives established weather from application state.
 8. Narrate only from returned `reasons`, fields, calendar events, and cited retrieved evidence.
